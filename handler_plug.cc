@@ -19,12 +19,13 @@ void handle_dependencies()
     while(solved && !obj.depends.empty())
     {
       depend_data depends=obj.depends.front();
-      if (scan_own_function(get_name(depends.fnc),obj.not_safe))
+      bool fatal;
+      if (scan_own_function(get_name(depends.fnc),obj.not_safe,fatal))
       {
         if (obj.not_safe)
         {
           if (obj.is_handler)
-            print_warning(depends.handler,depends.fnc,depends.line,depends.column);
+            print_warning(depends.handler,depends.fnc,depends.loc,fatal);
           break;
         }
         obj.depends.pop_front();
@@ -100,8 +101,39 @@ bool is_handler_ok_fnc (const char* name)
   }
   return false;
 }
+//scan if the called function in signal handler is asynchronous-unsafe
+bool is_handler_wrong_fnc(const char* name)
+{
+  if (!name)
+    return false;
+  static const char* unsafe_fnc[]={
+    "malloc", "free", "grantpt", "unlockpt", "ptsname", "ptsname_r",
+    "mallinfo", "mallopt", "mtrace", "muntrace", "realloc", "reallocarray",
+    "aligned_alloc", "memalign", "posix_memalign", "valloc", "calloc",
+    "shm_open", "shm_unlink", "printf", "wprintf", "fprintf", "fwprintf",
+    "sprintf", "swprintf", "snprintf", "sem_open", "sem_close", "sem_unlink",
+    "fclose", "fcloseall", "fopen", "fopen64", "freopen", "freopen64",
+    "fgetc", "fgetwc", "fgetc_unlocked", "fgetwc_unlocked", "getc",
+    "getwc", "getc_unlocked", "getwc_unlocked", "getchar", "getwchar",
+    "getchar_unlocked", "getwchar_unlocked", "getw", "fputc", "fputwc",
+    "fputc_unlocked", "fputwc_unlocked", "putc", "putwc", "putc_unlocked",
+    "putwc_unlocked", "putchar", "putwchar", "putchar_unlocked",
+    "putwchar_unlocked", "fputs", "fputws", "fputs_unlocked",
+    "fputws_unlocked", "puts", "putw", "strerror", "strerror_r",
+    "perror", "error", "error_at_line", "warn", "vwarn", "warnx",
+    "vwarnx", "err", "verr", "errx", "verrx", "scanf", "wscanf",
+    "fscanf", "fwscanf", "sscanf", "swscanf", "exit", "longjmp",
+    "sigsetjmp", "siglongjmp", "tmpfile", "tmpfile64", "tmpnam",
+    "tempnam"};
+  for(unsigned i=0;i<(sizeof(unsafe_fnc)/sizeof(char*));++i)
+  {
+    if(strcmp(unsafe_fnc[i],name)==0)
+      return true;
+  }
+  return false;
+}
 //scan user declared function in signal handler
-bool scan_own_function (const char* name,bool &not_safe)
+bool scan_own_function (const char* name,bool &not_safe,bool &fatal)
 {
   basic_block bb;
   bool all_ok=false;
@@ -129,21 +161,20 @@ bool scan_own_function (const char* name,bool &not_safe)
             const char* called_function_name = get_name(fn_decl);
             if (DECL_INITIAL  (fn_decl))
             {
-              expanded_location exp_loc = expand_location(gimple_location(stmt));
               depend_data save_dependencies;
-              save_dependencies.line = exp_loc.line;
-              save_dependencies.column = exp_loc.column;
+              save_dependencies.loc = gimple_location(stmt);
               save_dependencies.fnc = fn_decl;
               // in case of recurse, do nothing
               if (strcmp(get_name(obj.fnc_tree),called_function_name)==0)
                 ;
-              else if (scan_own_function(called_function_name,obj.not_safe))
+              else if (scan_own_function(called_function_name,obj.not_safe,fatal))
               {
                 if (obj.not_safe)
                 {
-                  obj.err_loc = expand_location(gimple_location(stmt));
+                  obj.err_loc = gimple_location(stmt);
                   obj.err_fnc=fn_decl;
                   not_safe=true;
+                  fatal=true;
                   return true;
                 }
               }
@@ -158,11 +189,24 @@ bool scan_own_function (const char* name,bool &not_safe)
             {
               if(!is_handler_ok_fnc(called_function_name))
               {
-                obj.err_loc = expand_location(gimple_location(stmt));
-                obj.err_fnc=fn_decl;
-                obj.not_safe=true;
-                not_safe=true;
+                if (is_handler_wrong_fnc(called_function_name))
+                {
+                  obj.err_loc = gimple_location(stmt);
+                  obj.err_fnc=fn_decl;
+                  obj.not_safe=true;
+                  not_safe=true;
+                  fatal=true;
                 return true;
+                }
+                else
+                {
+                  obj.err_loc = gimple_location(stmt);
+                  obj.err_fnc=fn_decl;
+                  obj.not_safe=true;
+                  not_safe=true;
+                  fatal=false;
+                  return true;
+                }
               }
             }
           }
@@ -177,25 +221,38 @@ bool scan_own_function (const char* name,bool &not_safe)
 
 //print warning about non asynchronous-safe function fnc in signal handler handler
 inline
-void print_warning(tree handler,tree fnc,int line,int column)
+void print_warning(tree handler,tree fnc,location_t loc,bool fatal)
 {
-  const char* filename = EXPR_FILENAME (handler);
   const char* handler_name = get_name(handler);
   const char* fnc_name = get_name(fnc);
-  if(!isatty(STDERR_FILENO))
+  std::string msg;
+  if (fatal)
   {
-    std::cerr << filename << ": In function ‘" << handler_name << "‘:\n";
-    std::cerr << filename << ":" << line << ":" << column 
-      << ": warning: non asynchronous-safe function ‘" 
-      << fnc_name <<"‘ in signal handler\n";
+    msg = "asynchronous-unsafe function";
   }
   else
   {
-    std::cerr << "\033[1;1m" << filename << ":\033[0m In function ‘\033[1;1m" << handler_name << "\033[0m‘:\n";
-    std::cerr << "\033[1;1m" << filename << ":" << line << ":" << column 
-      << ":\033[0m \033[35;1mwarning:\033[0m non asynchronous-safe function ‘\033[1;1m" 
-      << fnc_name <<"\033[0m‘ in signal handler\n";
+    msg = "possible asynchronous-unsafe function";
   }
+  if(!isatty(STDERR_FILENO))
+  {
+    msg += " ‘";
+    msg += fnc_name;
+    msg += "‘ in signal handler";
+    msg += " ‘";
+    msg += handler_name;
+    msg += "‘";
+  }
+  else
+  {
+    msg += " ‘\033[1;1m";
+    msg += fnc_name;
+    msg += "\033[0m‘ in signal handler";
+    msg += " ‘\033[1;1m";
+    msg += handler_name;
+    msg += "\033[0m‘";
+  }
+  warning_at(loc,0,msg.c_str());
 }
 
 
@@ -325,7 +382,7 @@ struct handler_check_pass : gimple_opt_pass
             obj.is_handler=true;
             if (obj.not_safe)
             {
-              print_warning(handler,obj.err_fnc,obj.err_loc.line,obj.err_loc.column);
+              print_warning(handler,obj.err_fnc,obj.err_loc,true);
               break;
             }
             bool all_ok=true;
@@ -343,17 +400,16 @@ struct handler_check_pass : gimple_opt_pass
                   const char* name = get_name(fn_decl);
                   if (DECL_INITIAL  (fn_decl))
                   {
-                    expanded_location exp_loc = expand_location(gimple_location(stmt));
                     depend_data save_dependencies;
-                    save_dependencies.line = exp_loc.line;
-                    save_dependencies.column = exp_loc.column;
+                    save_dependencies.loc = (gimple_location(stmt));
                     save_dependencies.fnc = fn_decl;
                     save_dependencies.handler=handler;
-                    if (scan_own_function(name,obj.not_safe))
+                    bool fatal;
+                    if (scan_own_function(name,obj.not_safe,fatal))
                     {
                       if (obj.not_safe)
                       {
-                        print_warning(handler,fn_decl,exp_loc.line,exp_loc.column);
+                        print_warning(handler,fn_decl,gimple_location(stmt),fatal);
                         all_ok=false;
                         break;
                       }
@@ -369,11 +425,20 @@ struct handler_check_pass : gimple_opt_pass
                   {
                     if(!is_handler_ok_fnc(name))
                     {
-                      obj.not_safe=true;
-                      expanded_location exp_loc = expand_location(gimple_location(stmt));
-                      print_warning(handler,fn_decl,exp_loc.line,exp_loc.column);
-                      all_ok=false;
-                      break;
+                      if (is_handler_wrong_fnc(name))
+                      {
+                        obj.not_safe=true;
+                        print_warning(handler,fn_decl,gimple_location(stmt),true);
+                        all_ok=false;
+                        break;
+                      }
+                      else
+                      {
+                        obj.not_safe=true;
+                        print_warning(handler,fn_decl,gimple_location(stmt),false);
+                        all_ok=false;
+                        break;
+                      }
                     }
                   }
                 }
