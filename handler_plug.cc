@@ -39,18 +39,11 @@ void handle_dependencies()
 tree get_handler(gimple* stmt)
 {
   tree current_fn = gimple_call_fn(stmt);
-  tree fn_decl = gimple_call_fndecl(stmt);
   if (!current_fn)
     return nullptr;
   const char* name = get_name(current_fn);
   if (!name)
     return nullptr;
-  if (!fn_decl)
-    return nullptr;
-  if (DECL_INITIAL (fn_decl))
-    std::cerr << get_name(fn_decl) << " function is\n";
-  else
-    std::cerr << get_name(fn_decl) << " function is not\n";   
   if (strcmp(name,"sigaction")==0)
   {
     tree var = gimple_call_arg (stmt, 1);
