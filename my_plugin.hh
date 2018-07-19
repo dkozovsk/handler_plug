@@ -10,13 +10,13 @@
 #include "tree-pass.h"
 #include "tree-ssa-operands.h"
 #include "gimple-iterator.h"
+#include "tree-pretty-print.h"
 
 // struct for remembering dependencies across functions
 struct depend_data {
   tree fnc;
   tree handler;
-  int line;
-  int column;
+  location_t loc;
 };
 
 //struct for remembering assigned functions to sigaction struct variables
@@ -29,16 +29,19 @@ struct handler_in_var {
 struct my_data {
     function* fun;
     tree fnc_tree;
-    expanded_location err_loc;
+    location_t err_loc;
     tree err_fnc;
     bool is_handler=false;
     bool is_ok=false;
     bool not_safe=false;
     bool was_err=false;
+    bool fatal=false;
     std::list<depend_data> depends;
     
 };
 void handle_dependencies();
 bool is_handler_ok_fnc (const char* name);
-bool scan_own_function (const char* name,bool &not_safe);
-void print_warning(tree handler,tree fnc,int line,int collumn);
+bool is_handler_wrong_fnc(const char* name);
+bool scan_own_function (const char* name,bool &not_safe,bool &fatal);
+tree give_me_handler(tree var,bool first);
+inline void print_warning(tree handler,tree fnc,location_t loc,bool fatal);
