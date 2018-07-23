@@ -37,6 +37,19 @@ void handle_dependencies()
    }
 }
 
+//returns true if fnc is already a setter
+bool is_setter(tree fnc)
+{
+   for (handler_setter &obj: own_setters)
+   {
+      if (strcmp(obj.setter,get_name(fnc)) == 0)
+      {
+         return true;
+      }
+   }
+   return false;
+}
+
 //get tree of handler from call stmt
 tree get_handler(gimple* stmt)
 {
@@ -101,13 +114,31 @@ tree get_handler(gimple* stmt)
       tree var = gimple_call_arg (stmt, 1);
       if(!is_gimple_addressable (var) && TREE_CODE(var) != INTEGER_CST)
          return var;
+      else if (TREE_CODE(var) == PARM_DECL)
+      {
+         unsigned counter=0;
+         for (tree argument = DECL_ARGUMENTS (current_function_decl) ; argument ; argument = TREE_CHAIN (argument))
+         {
+            if (strcmp(get_name(argument),get_name(var))==0)
+            {
+               handler_setter tmp;
+               tmp.setter = get_name(current_function_decl);
+               tmp.position = counter;
+               own_setters.push_front(tmp);
+               added_new_setter=true;
+               break;
+            }
+            ++counter;
+         }
+      }
    }
    else
-      return scan_own_handler_setter(stmt);
+      return scan_own_handler_setter(stmt,current_function_decl);
    return nullptr;
 }
 
-tree scan_own_handler_setter(gimple* stmt)
+//look through own setters, try to find handler
+tree scan_own_handler_setter(gimple* stmt,tree fun_decl)
 {
    for (handler_setter &obj: own_setters)
    {
@@ -122,7 +153,27 @@ tree scan_own_handler_setter(gimple* stmt)
          tree var = gimple_call_arg (stmt, obj.position);
          if(!is_gimple_addressable (var) && TREE_CODE(var) != INTEGER_CST)
             return var;
-         return nullptr;
+         else if (TREE_CODE(var) == PARM_DECL)
+         {
+            unsigned counter=0;
+            for (tree argument = DECL_ARGUMENTS (fun_decl) ; argument ; argument = TREE_CHAIN (argument))
+            {
+               if (strcmp(get_name(argument),get_name(var))==0)
+               {
+                  if (is_setter(fun_decl))
+                  {
+                     break;
+                  }
+                  handler_setter tmp;
+                  tmp.setter = get_name(fun_decl);
+                  tmp.position = counter;
+                  own_setters.push_front(tmp);
+                  added_new_setter=true;
+                  break;
+               }
+               ++counter;
+            }
+         }
       }
    }
    return nullptr;
@@ -185,6 +236,7 @@ bool is_handler_ok_fnc (const char* name)
    }
    return false;
 }
+
 //scan if the called function in signal handler is asynchronous-unsafe
 bool is_handler_wrong_fnc(const char* name)
 {
@@ -216,6 +268,7 @@ bool is_handler_wrong_fnc(const char* name)
    }
    return false;
 }
+
 //scan user declared function in signal handler
 bool scan_own_function (const char* name,bool &not_safe,bool &fatal)
 {
@@ -448,8 +501,10 @@ struct handler_check_pass : gimple_opt_pass
          }
       }
       //if new setter was found, check already checked functions with new setters
-      if (added_new_setter)
+      
+      while (added_new_setter)
       {
+         added_new_setter=false;
          for (my_data &obj: fnc_list)
          {
             basic_block bb;
@@ -462,7 +517,7 @@ struct handler_check_pass : gimple_opt_pass
                   gimple * stmt = gsi_stmt (gsi);
                   if (gimple_code(stmt)==GIMPLE_CALL)
                   {
-                     handler = scan_own_handler_setter(stmt);
+                     handler = scan_own_handler_setter(stmt,obj.fnc_tree);
                      if (handler!=nullptr)
                      {
                         //std::cerr << "‘\033[1;1m signal handler " << get_name(handler) << " found \033[0m‘\n";
@@ -473,8 +528,9 @@ struct handler_check_pass : gimple_opt_pass
                }
             }
          }
-         added_new_setter=false;
       }
+
+
       //scan all identified signal handlers
       while(!handlers.empty())
       {
