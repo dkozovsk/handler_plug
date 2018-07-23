@@ -11,6 +11,7 @@
 #include "tree-ssa-operands.h"
 #include "gimple-iterator.h"
 #include "tree-pretty-print.h"
+#include "gimple-pretty-print.h"
 
 // struct for remembering dependencies across functions
 struct depend_data {
@@ -23,6 +24,11 @@ struct depend_data {
 struct handler_in_var {
     const char* var_name;
     tree handler;
+};
+
+struct handler_setter {
+    const char* setter;
+    unsigned int position;
 };
 
 //struct for storing all informations about scaned functions
@@ -44,4 +50,5 @@ bool is_handler_ok_fnc (const char* name);
 bool is_handler_wrong_fnc(const char* name);
 bool scan_own_function (const char* name,bool &not_safe,bool &fatal);
 tree give_me_handler(tree var,bool first);
+tree scan_own_handler_setter(gimple* stmt);
 inline void print_warning(tree handler,tree fnc,location_t loc,bool fatal);

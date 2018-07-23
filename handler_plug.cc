@@ -1,10 +1,12 @@
 #include "my_plugin.hh"
 
-std::list<my_data> fnc_list;
-std::list<tree> handlers;
-std::list<handler_in_var> possible_handlers;
+static std::list<my_data> fnc_list;
+static std::list<tree> handlers;
+static std::list<handler_in_var> possible_handlers;
+static std::list<handler_setter> own_setters;
 
 bool dependencies_handled=true;
+bool added_new_setter=false;
 
 //scan functions called in signal handlers
 void handle_dependencies()
@@ -59,6 +61,23 @@ tree get_handler(gimple* stmt)
             possible_handlers.erase(it);
             if(!is_gimple_addressable (tmp.handler))
                return tmp.handler;
+            else if (TREE_CODE(tmp.handler) == PARM_DECL)
+            {
+               unsigned counter=0;
+               for (tree argument = DECL_ARGUMENTS (current_function_decl) ; argument ; argument = TREE_CHAIN (argument))
+               {
+                  if (strcmp(get_name(argument),get_name(tmp.handler))==0)
+                  {
+                     handler_setter tmp;
+                     tmp.setter = get_name(current_function_decl);
+                     tmp.position = counter;
+                     own_setters.push_front(tmp);
+                     added_new_setter=true;
+                     break;
+                  }
+                  ++counter;
+               }
+            }
             return nullptr;
          }
       }
@@ -71,7 +90,7 @@ tree get_handler(gimple* stmt)
             if (initial)
             {
                initial = give_me_handler(initial,true);
-               if(!is_gimple_addressable (initial))
+               if(!is_gimple_addressable (initial) && TREE_CODE(var) != INTEGER_CST)
                   return initial;
             }
          }
@@ -80,8 +99,31 @@ tree get_handler(gimple* stmt)
    else if (strcmp(name,"signal")==0 || strcmp(name,"bsd_signal")==0 || strcmp(name,"sysv_signal")==0)
    {
       tree var = gimple_call_arg (stmt, 1);
-      if(!is_gimple_addressable (var))
+      if(!is_gimple_addressable (var) && TREE_CODE(var) != INTEGER_CST)
          return var;
+   }
+   else
+      return scan_own_handler_setter(stmt);
+   return nullptr;
+}
+
+tree scan_own_handler_setter(gimple* stmt)
+{
+   for (handler_setter &obj: own_setters)
+   {
+      tree current_fn = gimple_call_fn(stmt);
+      if (!current_fn)
+         return nullptr;
+      const char* name = get_name(current_fn);
+      if (!name)
+         return nullptr;
+      if (strcmp(name,obj.setter)==0)
+      {
+         tree var = gimple_call_arg (stmt, obj.position);
+         if(!is_gimple_addressable (var) && TREE_CODE(var) != INTEGER_CST)
+            return var;
+         return nullptr;
+      }
    }
    return nullptr;
 }
@@ -343,6 +385,7 @@ struct handler_check_pass : gimple_opt_pass
       tmp.fun=fun;
       tmp.fnc_tree=current_function_decl;
       fnc_list.push_front(tmp);
+      //std::cerr << "in function " << get_name(tmp.fnc_tree) << "\n";
       FOR_ALL_BB_FN(bb, fun)
       {
 
@@ -351,6 +394,7 @@ struct handler_check_pass : gimple_opt_pass
          for (gsi = gsi_start_bb (bb); !gsi_end_p (gsi); gsi_next (&gsi))
          {
             gimple * stmt = gsi_stmt (gsi);
+            //print_gimple_stmt (stderr,stmt,0,0);
             if (gimple_code(stmt)==GIMPLE_CALL)
                handler=get_handler(stmt);
             else if (gimple_code(stmt)==GIMPLE_ASSIGN)
@@ -397,10 +441,39 @@ struct handler_check_pass : gimple_opt_pass
             }
             if (handler!=nullptr)
             {
+               //std::cerr << "‘\033[1;1m signal handler " << get_name(handler) << " found \033[0m‘\n";
                handlers.push_front(handler);
                handler=nullptr;
             }
          }
+      }
+      //if new setter was found, check already checked functions with new setters
+      if (added_new_setter)
+      {
+         for (my_data &obj: fnc_list)
+         {
+            basic_block bb;
+            FOR_ALL_BB_FN(bb, obj.fun)
+            {
+
+               gimple_stmt_iterator gsi;
+               for (gsi = gsi_start_bb (bb); !gsi_end_p (gsi); gsi_next (&gsi))
+               {
+                  gimple * stmt = gsi_stmt (gsi);
+                  if (gimple_code(stmt)==GIMPLE_CALL)
+                  {
+                     handler = scan_own_handler_setter(stmt);
+                     if (handler!=nullptr)
+                     {
+                        //std::cerr << "‘\033[1;1m signal handler " << get_name(handler) << " found \033[0m‘\n";
+                        handlers.push_front(handler);
+                        handler=nullptr;
+                     }
+                  }
+               }
+            }
+         }
+         added_new_setter=false;
       }
       //scan all identified signal handlers
       while(!handlers.empty())
