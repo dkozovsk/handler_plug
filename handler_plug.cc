@@ -70,21 +70,21 @@ tree get_handler(gimple* stmt)
       {
          if (strcmp(it->var_name,name)==0)
          {
-            handler_in_var tmp = *it;
+            handler_in_var var_handler = *it;
             possible_handlers.erase(it);
-            if(!is_gimple_addressable (tmp.handler))
-               return tmp.handler;
-            else if (TREE_CODE(tmp.handler) == PARM_DECL)
+            if(!is_gimple_addressable (var_handler.handler))
+               return var_handler.handler;
+            else if (TREE_CODE(var_handler.handler) == PARM_DECL)
             {
                unsigned counter=0;
                for (tree argument = DECL_ARGUMENTS (current_function_decl) ; argument ; argument = TREE_CHAIN (argument))
                {
-                  if (strcmp(get_name(argument),get_name(tmp.handler))==0)
+                  if (strcmp(get_name(argument),get_name(var_handler.handler))==0)
                   {
-                     handler_setter tmp;
-                     tmp.setter = get_name(current_function_decl);
-                     tmp.position = counter;
-                     own_setters.push_front(tmp);
+                     handler_setter new_setter;
+                     new_setter.setter = get_name(current_function_decl);
+                     new_setter.position = counter;
+                     own_setters.push_front(new_setter);
                      added_new_setter=true;
                      break;
                   }
@@ -121,10 +121,10 @@ tree get_handler(gimple* stmt)
          {
             if (strcmp(get_name(argument),get_name(var))==0)
             {
-               handler_setter tmp;
-               tmp.setter = get_name(current_function_decl);
-               tmp.position = counter;
-               own_setters.push_front(tmp);
+               handler_setter new_setter;
+               new_setter.setter = get_name(current_function_decl);
+               new_setter.position = counter;
+               own_setters.push_front(new_setter);
                added_new_setter=true;
                break;
             }
@@ -164,10 +164,10 @@ tree scan_own_handler_setter(gimple* stmt,tree fun_decl)
                   {
                      break;
                   }
-                  handler_setter tmp;
-                  tmp.setter = get_name(fun_decl);
-                  tmp.position = counter;
-                  own_setters.push_front(tmp);
+                  handler_setter new_setter;
+                  new_setter.setter = get_name(fun_decl);
+                  new_setter.position = counter;
+                  own_setters.push_front(new_setter);
                   added_new_setter=true;
                   break;
                }
@@ -434,11 +434,11 @@ struct handler_check_pass : gimple_opt_pass
    {
       basic_block bb;
       tree handler=nullptr;
-      my_data tmp;
-      tmp.fun=fun;
-      tmp.fnc_tree=current_function_decl;
-      fnc_list.push_front(tmp);
-      //std::cerr << "in function " << get_name(tmp.fnc_tree) << "\n";
+      my_data new_fnc;
+      new_fnc.fun=fun;
+      new_fnc.fnc_tree=current_function_decl;
+      fnc_list.push_front(new_fnc);
+      //std::cerr << "in function " << get_name(new_fnc.fnc_tree) << "\n";
       FOR_ALL_BB_FN(bb, fun)
       {
 
@@ -481,10 +481,10 @@ struct handler_check_pass : gimple_opt_pass
                               }
                               if (var_name!= nullptr)
                               {
-                                 handler_in_var tmp;
-                                 tmp.var_name=var_name;
-                                 tmp.handler=gimple_assign_rhs1 (stmt);
-                                 possible_handlers.push_front(tmp);
+                                 handler_in_var new_var_handler;
+                                 new_var_handler.var_name=var_name;
+                                 new_var_handler.handler=gimple_assign_rhs1 (stmt);
+                                 possible_handlers.push_front(new_var_handler);
                               }
                            }
                         }
