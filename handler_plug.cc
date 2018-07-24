@@ -5,8 +5,8 @@ static std::list<tree> handlers;
 static std::list<handler_in_var> possible_handlers;
 static std::list<handler_setter> own_setters;
 
-bool dependencies_handled=true;
-bool added_new_setter=false;
+static bool dependencies_handled=true;
+static bool added_new_setter=false;
 
 //scan functions called in signal handlers
 void handle_dependencies()
@@ -72,7 +72,7 @@ tree get_handler(gimple* stmt)
          {
             handler_in_var var_handler = *it;
             possible_handlers.erase(it);
-            if(!is_gimple_addressable (var_handler.handler))
+            if(!is_gimple_addressable (var_handler.handler) && TREE_CODE(var) == ADDR_EXPR)
                return var_handler.handler;
             else if (TREE_CODE(var_handler.handler) == PARM_DECL)
             {
@@ -103,7 +103,7 @@ tree get_handler(gimple* stmt)
             if (initial)
             {
                initial = give_me_handler(initial,true);
-               if(!is_gimple_addressable (initial) && TREE_CODE(var) != INTEGER_CST)
+               if(!is_gimple_addressable (initial) && TREE_CODE(var) == ADDR_EXPR)
                   return initial;
             }
          }
@@ -112,7 +112,7 @@ tree get_handler(gimple* stmt)
    else if (strcmp(name,"signal")==0 || strcmp(name,"bsd_signal")==0 || strcmp(name,"sysv_signal")==0)
    {
       tree var = gimple_call_arg (stmt, 1);
-      if(!is_gimple_addressable (var) && TREE_CODE(var) != INTEGER_CST)
+      if(!is_gimple_addressable (var) && TREE_CODE(var) == ADDR_EXPR)
          return var;
       else if (TREE_CODE(var) == PARM_DECL)
       {
@@ -151,7 +151,7 @@ tree scan_own_handler_setter(gimple* stmt,tree fun_decl)
       if (strcmp(name,obj.setter)==0)
       {
          tree var = gimple_call_arg (stmt, obj.position);
-         if(!is_gimple_addressable (var) && TREE_CODE(var) != INTEGER_CST)
+         if(!is_gimple_addressable (var) && TREE_CODE(var) == ADDR_EXPR)
             return var;
          else if (TREE_CODE(var) == PARM_DECL)
          {
@@ -198,7 +198,7 @@ tree give_me_handler(tree var,bool first)
                   return give_me_handler(val,false);
                }
             }
-            else if (!first && strcmp(get_name(field),"sa_handler")==0)
+            else if (!first && (strcmp(get_name(field),"sa_handler")==0 || strcmp(get_name(field),"sa_sigaction")==0))
             {
                return val;
             }
@@ -390,25 +390,11 @@ void print_warning(tree handler,tree fnc,location_t loc,bool fatal)
 }
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // We must assert that this plugin is GPL compatible
 int plugin_is_GPL_compatible;
 
 static struct plugin_info handler_check_gcc_plugin_info =
-{ "1.0", "This plugin scans signal handlers for non asynchronous-safe functions" };
+{ "1.0", "This plugin scans signal handlers for asynchronous-unsafe functions" };
 
 namespace {
 const pass_data handler_check_pass_data =
@@ -452,7 +438,7 @@ struct handler_check_pass : gimple_opt_pass
                handler=get_handler(stmt);
             else if (gimple_code(stmt)==GIMPLE_ASSIGN)
             {
-               //expand COMPONENT_REF into separated stings
+               //expand COMPONENT_REF into separated strings
                if (TREE_CODE(gimple_assign_lhs(stmt))==COMPONENT_REF)
                {
                   tree node,op0,op1,op2;
@@ -495,6 +481,7 @@ struct handler_check_pass : gimple_opt_pass
             if (handler!=nullptr)
             {
                //std::cerr << "‘\033[1;1m signal handler " << get_name(handler) << " found \033[0m‘\n";
+               //std::cerr << get_tree_code_name (TREE_CODE (handler)) << "\n";
                handlers.push_front(handler);
                handler=nullptr;
             }
@@ -573,7 +560,10 @@ struct handler_check_pass : gimple_opt_pass
                               save_dependencies.fnc = fn_decl;
                               save_dependencies.handler=handler;
                               bool fatal;
-                              if (scan_own_function(name,obj.not_safe,fatal))
+                              //in case of recurse do nothing
+                              if (strcmp(get_name(obj.fnc_tree),name)==0)
+                                 ;
+                              else if (scan_own_function(name,obj.not_safe,fatal))
                               {
                                  if (obj.not_safe)
                                  {
