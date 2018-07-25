@@ -7,6 +7,7 @@ URL:        https://github.com/dkozovsk/%{name}
 Source0:    %{name}-%{version}.tar.xz
 
 BuildRequires: gcc
+BuildRequires: gcc-c++
 BuildRequires: gcc-plugin-devel
 
 %description
