@@ -1,5 +1,5 @@
 Name:       handler_plug
-Version:    0.0.1.1.gce4407c
+Version:    0.0.1.10.g761add4
 Release:    1%{?dist}
 Summary:    TODO
 License:    GPLv3+
@@ -13,6 +13,8 @@ BuildRequires: gcc-plugin-devel
 %description
 TODO
 
+%global HANDLER_PLUGIN_DIR %(gcc -print-file-name=plugin)
+
 %prep
 %setup
 
@@ -21,8 +23,9 @@ export CXXFLAGS="%{optflags}"
 make
 
 %install
-install -m0755 -d $RPM_BUILD_ROOT%{_libdir}
-install -m0755 handler_plug.so $RPM_BUILD_ROOT%{_libdir}
+
+install -m0755 -d $RPM_BUILD_ROOT%{HANDLER_PLUGIN_DIR}
+install -m0755 handler_plug.so $RPM_BUILD_ROOT%{HANDLER_PLUGIN_DIR}
 
 %files
-%{_libdir}/*.so
+%{HANDLER_PLUGIN_DIR}/*.so
