@@ -16,6 +16,7 @@ TODO
 %setup
 
 %build
+export CXXFLAGS="%{optflags}"
 make
 
 %install

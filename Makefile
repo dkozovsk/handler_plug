@@ -1,5 +1,4 @@
 CXX = g++
-CC = gcc
 PLUGINDIR=$(shell $(CXX) -print-file-name=plugin)
  
 all: handler_plug.so
@@ -12,12 +11,3 @@ handler_plug.o : handler_plug.cc handler_plug.hh
  
 clean:
 	rm -f handler_plug.o handler_plug.so 
-
-print: handler_plug.so
-	$(CC) -fplugin=./handler_plug.so --version
-
-check: handler_plug.so
-	$(CC) -fplugin=./handler_plug.so -c test.c -o /dev/null
-
-check2: handler_plug.so
-	$(CC) -fplugin=./handler_plug.so -c test2.c -o /dev/null

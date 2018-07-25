@@ -386,7 +386,7 @@ void print_warning(tree handler,tree fnc,location_t loc,bool fatal)
       msg += handler_name;
       msg += "\033[0m‘";
    }
-   warning_at(loc,0,msg.c_str());
+   warning_at(loc,0,"%s",msg.c_str());
 }
 
 
