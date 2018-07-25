@@ -1,8 +1,6 @@
 CXX = g++
 CC = gcc
-CXXFLAGS += -std=c++11 -Wall -fno-rtti -Wno-literal-suffix
 PLUGINDIR=$(shell $(CXX) -print-file-name=plugin)
-CXXFLAGS += -I$(PLUGINDIR)/include
  
 all: handler_plug.so
  
@@ -10,7 +8,7 @@ handler_plug.so: handler_plug.o
 	$(CXX) $(LDFLAGS) -shared -o $@ $<
  
 handler_plug.o : handler_plug.cc handler_plug.hh
-	$(CXX) $(CXXFLAGS) -fPIC -c -o $@ $<
+	$(CXX) $(CXXFLAGS) -std=c++11 -Wall -fno-rtti -Wno-literal-suffix -I$(PLUGINDIR)/include -fPIC -c -o $@ $<
  
 clean:
 	rm -f handler_plug.o handler_plug.so 
