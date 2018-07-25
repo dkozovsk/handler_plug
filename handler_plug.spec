@@ -1,5 +1,5 @@
 Name:       handler_plug
-Version:    0.1
+Version:    0.0.1.1.gce4407c
 Release:    1%{?dist}
 Summary:    TODO
 License:    GPLv3+
@@ -20,7 +20,7 @@ make
 
 %install
 install -m0755 -d $RPM_BUILD_ROOT%{_libdir}
-install -m0755 handle_plug.so $RPM_BUILD_ROOT%{_libdir}
+install -m0755 handler_plug.so $RPM_BUILD_ROOT%{_libdir}
 
 %files
 %{_libdir}/*.so
