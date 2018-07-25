@@ -1,7 +1,6 @@
-GCCDIR = /home/dkozovsk/gcc-plugins/gcc-install/bin
 CXX = g++
 CC = gcc
-CXXFLAGS = -std=c++11 -Wall -fno-rtti -Wno-literal-suffix
+CXXFLAGS += -std=c++11 -Wall -fno-rtti -Wno-literal-suffix
 PLUGINDIR=$(shell $(CXX) -print-file-name=plugin)
 CXXFLAGS += -I$(PLUGINDIR)/include
  

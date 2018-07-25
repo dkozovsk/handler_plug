@@ -23,4 +23,4 @@ install -m0755 -d $RPM_BUILD_ROOT%{_libdir}
 install -m0755 handler_plug.so $RPM_BUILD_ROOT%{_libdir}
 
 %files
-%{_libdir}/*.so 
+%{_libdir}/*.so
