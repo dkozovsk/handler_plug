@@ -10,7 +10,7 @@ all: handler_plug.so
 handler_plug.so: handler_plug.o
 	$(CXX) $(LDFLAGS) -shared -o $@ $<
  
-handler_plug.o : handler_plug.cc my_plugin.hh
+handler_plug.o : handler_plug.cc handler_plug.hh
 	$(CXX) $(CXXFLAGS) -fPIC -c -o $@ $<
  
 clean:
