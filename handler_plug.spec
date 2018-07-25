@@ -13,7 +13,7 @@ BuildRequires: gcc-plugin-devel
 TODO
 
 %prep
-%setup -q
+%setup
 
 %build
 make
