@@ -1,5 +1,5 @@
 Name:       handler_plug
-Version:    0.0.1.10.g761add4
+Version:    0.0.1.11.g6d7e922
 Release:    1%{?dist}
 Summary:    TODO
 License:    GPLv3+

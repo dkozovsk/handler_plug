@@ -72,7 +72,7 @@ tree get_handler(gimple* stmt)
          {
             handler_in_var var_handler = *it;
             possible_handlers.erase(it);
-            if(!is_gimple_addressable (var_handler.handler) && TREE_CODE(var) == ADDR_EXPR)
+            if(!is_gimple_addressable (var_handler.handler) && TREE_CODE(var_handler.handler) == ADDR_EXPR)
                return var_handler.handler;
             else if (TREE_CODE(var_handler.handler) == PARM_DECL)
             {
@@ -97,13 +97,15 @@ tree get_handler(gimple* stmt)
       if (TREE_CODE(var) == ADDR_EXPR)
       {
          tree vardecl = TREE_OPERAND (var, 0);
+         if (!vardecl)
+            return nullptr;
          if (TREE_CODE(vardecl)==VAR_DECL && !DECL_EXTERNAL (vardecl))
          {
             tree initial = DECL_INITIAL(vardecl);
             if (initial)
             {
                initial = give_me_handler(initial,true);
-               if(!is_gimple_addressable (initial) && TREE_CODE(var) == ADDR_EXPR)
+               if(!is_gimple_addressable (initial) && TREE_CODE(initial) == ADDR_EXPR)
                   return initial;
             }
          }
@@ -453,6 +455,8 @@ struct handler_check_pass : gimple_opt_pass
 
                      if (TREE_CODE(op1)==FIELD_DECL)
                      {
+                        if (!DECL_NAME(op1))
+                           continue;
                         const char *field_name = identifier_to_locale (IDENTIFIER_POINTER (DECL_NAME (op1)));
                         if (strcmp(field_name,"__sigaction_handler")==0)
                         {
@@ -490,7 +494,6 @@ struct handler_check_pass : gimple_opt_pass
          }
       }
       //if new setter was found, check already checked functions with new setters
-      
       while (added_new_setter)
       {
          added_new_setter=false;
