@@ -298,7 +298,11 @@ bool scan_own_function (const char* name,bool &not_safe,bool &fatal)
                if (gimple_code(stmt)==GIMPLE_CALL)
                {
                   tree fn_decl = gimple_call_fndecl(stmt);
+                  if (!fn_decl)
+                     continue;
                   const char* called_function_name = get_name(fn_decl);
+                  if (!called_function_name)
+                     continue;
                   if (DECL_INITIAL  (fn_decl))
                   {
                      depend_data save_dependencies;
@@ -460,6 +464,8 @@ struct handler_check_pass : gimple_opt_pass
                         const char *field_name = identifier_to_locale (IDENTIFIER_POINTER (DECL_NAME (op1)));
                         if (strcmp(field_name,"__sigaction_handler")==0)
                         {
+                           if (!DECL_NAME(op2))
+                              continue;
                            field_name = identifier_to_locale (IDENTIFIER_POINTER (DECL_NAME (op2)));
                            if (strcmp(field_name,"sa_handler")==0 || strcmp(field_name,"sa_sigaction")==0)
                            {
@@ -522,7 +528,6 @@ struct handler_check_pass : gimple_opt_pass
          }
       }
 
-
       //scan all identified signal handlers
       while(!handlers.empty())
       {
@@ -549,7 +554,6 @@ struct handler_check_pass : gimple_opt_pass
                   basic_block bb;
                   FOR_ALL_BB_FN(bb, obj.fun)
                   {
-
                      gimple_stmt_iterator gsi;
                      for (gsi = gsi_start_bb (bb); !gsi_end_p (gsi); gsi_next (&gsi))
                      {
@@ -557,7 +561,11 @@ struct handler_check_pass : gimple_opt_pass
                         if (gimple_code(stmt)==GIMPLE_CALL)
                         {
                            tree fn_decl = gimple_call_fndecl(stmt);
+                           if (!fn_decl)
+                              continue;
                            const char* name = get_name(fn_decl);
+                           if (!name)
+                              continue;
                            if (DECL_INITIAL  (fn_decl))
                            {
                               depend_data save_dependencies;
