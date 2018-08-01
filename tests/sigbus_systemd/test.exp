@@ -1,99 +1,99 @@
 In file included from ./sigbus.c:8:
-./sigbus.c: In function sigbus_install:
-./macro.h:26:24: warning: possible asynchronous-unsafe function __builtin_expect in signal handler sigbus_handler [-fplugin=handler_plug.so]
+./sigbus.c: In function 'sigbus_install':
+./macro.h:26:24: warning: possible asynchronous-unsafe function ‘__builtin_expect‘ in signal handler ‘sigbus_handler‘ [-fplugin=handler_plug.so]
  #define _unlikely_(x) (__builtin_expect(!!(x),0))
                        ~^~~~~~~~~~~~~~~~~~~~~~~~~~
-./macro.h:282:21: note: in expansion of macro _unlikely_
+./macro.h:282:21: note: in expansion of macro '_unlikely_'
                  if (_unlikely_(!(expr)))                                \
                      ^~~~~~~~~~
-./macro.h:299:22: note: in expansion of macro assert_message_se
+./macro.h:299:22: note: in expansion of macro 'assert_message_se'
  #define assert(expr) assert_message_se(expr, #expr)
                       ^~~~~~~~~~~~~~~~~
-./sigbus.c:88:9: note: in expansion of macro assert
+./sigbus.c:88:9: note: in expansion of macro 'assert'
          assert(sn == SIGBUS);
          ^~~~~~
 In file included from ./macro.h:458,
                  from ./sigbus.c:8:
-./log.h:177:9: warning: possible asynchronous-unsafe function log_assert_failed_realm in signal handler sigbus_handler [-fplugin=handler_plug.so]
+./log.h:177:9: warning: possible asynchronous-unsafe function ‘log_assert_failed_realm‘ in signal handler ‘sigbus_handler‘ [-fplugin=handler_plug.so]
          log_assert_failed_realm(LOG_REALM, (text), __VA_ARGS__)
          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-./macro.h:283:25: note: in expansion of macro log_assert_failed
+./macro.h:283:25: note: in expansion of macro 'log_assert_failed'
                          log_assert_failed(message, __FILE__, __LINE__, __PRETTY_FUNCTION__); \
                          ^~~~~~~~~~~~~~~~~
-./macro.h:299:22: note: in expansion of macro assert_message_se
+./macro.h:299:22: note: in expansion of macro 'assert_message_se'
  #define assert(expr) assert_message_se(expr, #expr)
                       ^~~~~~~~~~~~~~~~~
-./sigbus.c:88:9: note: in expansion of macro assert
+./sigbus.c:88:9: note: in expansion of macro 'assert'
          assert(sn == SIGBUS);
          ^~~~~~
 In file included from ./sigbus.c:8:
-./macro.h:26:24: warning: possible asynchronous-unsafe function __builtin_expect in signal handler sigbus_handler [-fplugin=handler_plug.so]
+./macro.h:26:24: warning: possible asynchronous-unsafe function ‘__builtin_expect‘ in signal handler ‘sigbus_handler‘ [-fplugin=handler_plug.so]
  #define _unlikely_(x) (__builtin_expect(!!(x),0))
                        ~^~~~~~~~~~~~~~~~~~~~~~~~~~
-./macro.h:282:21: note: in expansion of macro _unlikely_
+./macro.h:282:21: note: in expansion of macro '_unlikely_'
                  if (_unlikely_(!(expr)))                                \
                      ^~~~~~~~~~
-./macro.h:299:22: note: in expansion of macro assert_message_se
+./macro.h:299:22: note: in expansion of macro 'assert_message_se'
  #define assert(expr) assert_message_se(expr, #expr)
                       ^~~~~~~~~~~~~~~~~
-./sigbus.c:89:9: note: in expansion of macro assert
+./sigbus.c:89:9: note: in expansion of macro 'assert'
          assert(si);
          ^~~~~~
 In file included from ./macro.h:458,
                  from ./sigbus.c:8:
-./log.h:177:9: warning: possible asynchronous-unsafe function log_assert_failed_realm in signal handler sigbus_handler [-fplugin=handler_plug.so]
+./log.h:177:9: warning: possible asynchronous-unsafe function ‘log_assert_failed_realm‘ in signal handler ‘sigbus_handler‘ [-fplugin=handler_plug.so]
          log_assert_failed_realm(LOG_REALM, (text), __VA_ARGS__)
          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-./macro.h:283:25: note: in expansion of macro log_assert_failed
+./macro.h:283:25: note: in expansion of macro 'log_assert_failed'
                          log_assert_failed(message, __FILE__, __LINE__, __PRETTY_FUNCTION__); \
                          ^~~~~~~~~~~~~~~~~
-./macro.h:299:22: note: in expansion of macro assert_message_se
+./macro.h:299:22: note: in expansion of macro 'assert_message_se'
  #define assert(expr) assert_message_se(expr, #expr)
                       ^~~~~~~~~~~~~~~~~
-./sigbus.c:89:9: note: in expansion of macro assert
+./sigbus.c:89:9: note: in expansion of macro 'assert'
          assert(si);
          ^~~~~~
 In file included from ./sigbus.c:8:
-./macro.h:26:24: warning: possible asynchronous-unsafe function __builtin_expect in signal handler sigbus_handler [-fplugin=handler_plug.so]
+./macro.h:26:24: warning: possible asynchronous-unsafe function ‘__builtin_expect‘ in signal handler ‘sigbus_handler‘ [-fplugin=handler_plug.so]
  #define _unlikely_(x) (__builtin_expect(!!(x),0))
                        ~^~~~~~~~~~~~~~~~~~~~~~~~~~
-./macro.h:282:21: note: in expansion of macro _unlikely_
+./macro.h:282:21: note: in expansion of macro '_unlikely_'
                  if (_unlikely_(!(expr)))                                \
                      ^~~~~~~~~~
-./macro.h:292:25: note: in expansion of macro assert_message_se
+./macro.h:292:25: note: in expansion of macro 'assert_message_se'
  #define assert_se(expr) assert_message_se(expr, #expr)
                          ^~~~~~~~~~~~~~~~~
-./sigbus.c:92:17: note: in expansion of macro assert_se
+./sigbus.c:92:17: note: in expansion of macro 'assert_se'
                  assert_se(sigaction(SIGBUS, &old_sigaction, NULL) == 0);
                  ^~~~~~~~~
 In file included from ./macro.h:458,
                  from ./sigbus.c:8:
-./log.h:177:9: warning: possible asynchronous-unsafe function log_assert_failed_realm in signal handler sigbus_handler [-fplugin=handler_plug.so]
+./log.h:177:9: warning: possible asynchronous-unsafe function ‘log_assert_failed_realm‘ in signal handler ‘sigbus_handler‘ [-fplugin=handler_plug.so]
          log_assert_failed_realm(LOG_REALM, (text), __VA_ARGS__)
          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-./macro.h:283:25: note: in expansion of macro log_assert_failed
+./macro.h:283:25: note: in expansion of macro 'log_assert_failed'
                          log_assert_failed(message, __FILE__, __LINE__, __PRETTY_FUNCTION__); \
                          ^~~~~~~~~~~~~~~~~
-./macro.h:292:25: note: in expansion of macro assert_message_se
+./macro.h:292:25: note: in expansion of macro 'assert_message_se'
  #define assert_se(expr) assert_message_se(expr, #expr)
                          ^~~~~~~~~~~~~~~~~
-./sigbus.c:92:17: note: in expansion of macro assert_se
+./sigbus.c:92:17: note: in expansion of macro 'assert_se'
                  assert_se(sigaction(SIGBUS, &old_sigaction, NULL) == 0);
                  ^~~~~~~~~
-./sigbus.c:98:19: warning: possible asynchronous-unsafe function page_size in signal handler sigbus_handler [-fplugin=handler_plug.so]
+./sigbus.c:98:19: warning: possible asynchronous-unsafe function ‘page_size‘ in signal handler ‘sigbus_handler‘ [-fplugin=handler_plug.so]
          ul = ul / page_size();
                    ^~~~~~~~~~~
 In file included from ./macro.h:458,
                  from ./sigbus.c:8:
-./log.h:177:9: warning: possible asynchronous-unsafe function log_assert_failed_realm in signal handler sigbus_handler [-fplugin=handler_plug.so]
+./log.h:177:9: warning: possible asynchronous-unsafe function ‘log_assert_failed_realm‘ in signal handler ‘sigbus_handler‘ [-fplugin=handler_plug.so]
          log_assert_failed_realm(LOG_REALM, (text), __VA_ARGS__)
          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-./macro.h:283:25: note: in expansion of macro log_assert_failed
+./macro.h:283:25: note: in expansion of macro 'log_assert_failed'
                          log_assert_failed(message, __FILE__, __LINE__, __PRETTY_FUNCTION__); \
                          ^~~~~~~~~~~~~~~~~
-./macro.h:292:25: note: in expansion of macro assert_message_se
+./macro.h:292:25: note: in expansion of macro 'assert_message_se'
  #define assert_se(expr) assert_message_se(expr, #expr)
                          ^~~~~~~~~~~~~~~~~
-./sigbus.c:107:9: note: in expansion of macro assert_se
+./sigbus.c:107:9: note: in expansion of macro 'assert_se'
          assert_se(mmap(aligned, page_size(), PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, -1, 0) == aligned);
          ^~~~~~~~~

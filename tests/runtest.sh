@@ -1,4 +1,6 @@
 #!/bin/bash
+export LC_ALL=C
+
 cd ./$testdir
 result=$?
 if [ $result -ne 0 ] 
@@ -13,9 +15,7 @@ then
     echo "make error"
     exit 1
 fi
-cat ./test.err | tr -d ‘\' >test.tmp
-
-diff ./test.tmp ./test.exp
+diff ./test.err ./test.exp
 result=$?
-rm -f ./test.err ./test.tmp
+rm -f ./test.err
 exit $result
