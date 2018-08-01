@@ -15,7 +15,9 @@ then
     echo "make error"
     exit 1
 fi
-diff ./test.err ./test.exp
+sed 's/:0:$/:/' test.err >test.tmp
+sed 's/:0,$/,/' test.tmp >test.err
+diff -u ./test.err ./test.exp
 result=$?
-rm -f ./test.err
+rm -f ./test.err ./test.tmp
 exit $result
