@@ -1,5 +1,5 @@
 Name:       handler_plug
-Version:    0.0.1.11.g6d7e922
+Version:    0.0.1.13.g5e2de34
 Release:    1%{?dist}
 Summary:    TODO
 License:    GPLv3+
@@ -29,3 +29,6 @@ install -m0755 handler_plug.so $RPM_BUILD_ROOT%{HANDLER_PLUGIN_DIR}
 
 %files
 %{HANDLER_PLUGIN_DIR}/*.so
+
+%check
+make test
