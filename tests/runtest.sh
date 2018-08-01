@@ -13,7 +13,9 @@ then
     echo "make error"
     exit 1
 fi
-diff ./test.err ./test.exp
+cat ./test.err | tr -d ‘\' >test.tmp
+
+diff ./test.tmp ./test.exp
 result=$?
-rm -f ./test.err
+rm -f ./test.err ./test.tmp
 exit $result
