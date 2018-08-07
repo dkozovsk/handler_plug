@@ -27,7 +27,6 @@ void handle_dependencies()
                obj.fatal=fatal;
                if (obj.is_handler)
                   print_warning(depends.handler,depends.fnc,depends.loc,fatal);
-               break;
             }
             obj.depends.pop_front();
          }
@@ -274,6 +273,7 @@ bool is_handler_wrong_fnc(const char* name)
 //scan user declared function in signal handler
 bool scan_own_function (const char* name,bool &not_safe,bool &fatal)
 {
+   fatal=false;
    basic_block bb;
    bool all_ok=false;
    for (my_data &obj: fnc_list)
@@ -315,11 +315,16 @@ bool scan_own_function (const char* name,bool &not_safe,bool &fatal)
                      {
                         if (obj.not_safe)
                         {
-                           obj.err_loc = gimple_location(stmt);
-                           obj.err_fnc=fn_decl;
+                           remember_error new_err;
+                           new_err.err_loc = gimple_location(stmt);
+                           new_err.err_fnc = fn_decl;
+                           new_err.err_fatal = fatal;
+                           obj.err_log.push_front(new_err);
+                           
                            not_safe=true;
-                           obj.fatal=fatal;
-                           return true;
+                           if (!obj.fatal)
+                              obj.fatal=fatal;
+                           continue;
                         }
                      }
                      else
@@ -335,23 +340,31 @@ bool scan_own_function (const char* name,bool &not_safe,bool &fatal)
                      {
                         if (is_handler_wrong_fnc(called_function_name))
                         {
-                           obj.err_loc = gimple_location(stmt);
-                           obj.err_fnc=fn_decl;
+                           remember_error new_err;
+                           new_err.err_loc = gimple_location(stmt);
+                           new_err.err_fnc = fn_decl;
+                           new_err.err_fatal = true;
+                           obj.err_log.push_front(new_err);
+                           
                            obj.not_safe=true;
                            not_safe=true;
                            obj.fatal=true;
                            fatal=true;
-                           return true;
+                           continue;
                         }
                         else
                         {
-                           obj.err_loc = gimple_location(stmt);
-                           obj.err_fnc=fn_decl;
+                           remember_error new_err;
+                           new_err.err_loc = gimple_location(stmt);
+                           new_err.err_fnc = fn_decl;
+                           new_err.err_fatal = false;
+                           obj.err_log.push_front(new_err);
+                           
                            obj.not_safe=true;
                            not_safe=true;
-                           obj.fatal=false;
-                           fatal=false;
-                           return true;
+                           if (!obj.fatal)
+                              obj.fatal=false;
+                           continue;
                         }
                      }
                   }
@@ -360,6 +373,8 @@ bool scan_own_function (const char* name,bool &not_safe,bool &fatal)
          }
          // if everything scaned succefully function is asynchronous-safe
          obj.is_ok=all_ok;
+         if (not_safe)
+            return true;
       }
    }
    return all_ok;
@@ -547,7 +562,12 @@ struct handler_check_pass : gimple_opt_pass
                   obj.is_handler=true;
                   if (obj.not_safe)
                   {
-                     print_warning(handler,obj.err_fnc,obj.err_loc,true);
+                     while (!obj.err_log.empty())
+                     {
+                        remember_error err = obj.err_log.front();
+                        print_warning(handler,err.err_fnc,err.err_loc,err.err_fatal);
+                        obj.err_log.pop_front();
+                     }
                      break;
                   }
                   bool all_ok=true;
@@ -573,17 +593,19 @@ struct handler_check_pass : gimple_opt_pass
                               save_dependencies.fnc = fn_decl;
                               save_dependencies.handler=handler;
                               bool fatal;
+                              bool not_safe=false;
                               //in case of recurse do nothing
                               if (strcmp(get_name(obj.fnc_tree),name)==0)
                                  ;
-                              else if (scan_own_function(name,obj.not_safe,fatal))
+                              else if (scan_own_function(name,not_safe,fatal))
                               {
-                                 if (obj.not_safe)
+                                 if (not_safe)
                                  {
                                     obj.fatal=fatal;
+                                    obj.not_safe=true;
                                     print_warning(handler,fn_decl,gimple_location(stmt),fatal);
                                     all_ok=false;
-                                    break;
+                                    continue;
                                  }
                               }
                               else
@@ -603,7 +625,7 @@ struct handler_check_pass : gimple_opt_pass
                                     print_warning(handler,fn_decl,gimple_location(stmt),true);
                                     all_ok=false;
                                     obj.fatal=true;
-                                    break;
+                                    continue;
                                  }
                                  else
                                  {
@@ -611,7 +633,7 @@ struct handler_check_pass : gimple_opt_pass
                                     print_warning(handler,fn_decl,gimple_location(stmt),false);
                                     all_ok=false;
                                     obj.fatal=false;
-                                    break;
+                                    continue;
                                  }
                               }
                            }
@@ -620,6 +642,7 @@ struct handler_check_pass : gimple_opt_pass
                   }
                   // if everything scaned succefully handler is ok
                   obj.is_ok=all_ok;
+                  break;
                }
             }
             if (!found)

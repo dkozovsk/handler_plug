@@ -3,6 +3,6 @@
        termsig_handler (sig);
        ^~~~~~~~~~~~~~~~~~~~~
 ./sig.c: In function 'set_signal_handler':
-./sig.c:635:7: warning: possible asynchronous-unsafe function ‘throw_to_top_level‘ in signal handler ‘sigint_sighandler‘ [-fplugin=handler_plug.so]
+./sig.c:635:7: warning: asynchronous-unsafe function ‘throw_to_top_level‘ in signal handler ‘sigint_sighandler‘ [-fplugin=handler_plug.so]
        throw_to_top_level ();
        ^~~~~~~~~~~~~~~~~~~~~

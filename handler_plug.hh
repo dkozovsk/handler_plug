@@ -31,17 +31,22 @@ struct handler_setter {
     unsigned int position;
 };
 
+struct remember_error {
+	location_t err_loc;
+	tree err_fnc;
+	bool err_fatal=false;
+};
+
 //struct for storing all informations about scaned functions
 struct my_data {
     function* fun;
     tree fnc_tree;
-    location_t err_loc;
-    tree err_fnc;
     bool is_handler=false;
     bool is_ok=false;
     bool not_safe=false;
     bool was_err=false;
     bool fatal=false;
+    std::list<remember_error> err_log;
     std::list<depend_data> depends;
     
 };
