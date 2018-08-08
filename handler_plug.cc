@@ -372,9 +372,9 @@ bool scan_own_function (const char* name,bool &not_safe,bool &fatal)
             }
          }
          // if everything scaned succefully function is asynchronous-safe
-         obj.is_ok=all_ok;
          if (not_safe)
             return true;
+         obj.is_ok=all_ok;
       }
    }
    return all_ok;
@@ -601,7 +601,8 @@ struct handler_check_pass : gimple_opt_pass
                               {
                                  if (not_safe)
                                  {
-                                    obj.fatal=fatal;
+                                    if (!obj.fatal)
+                                       obj.fatal=fatal;
                                     obj.not_safe=true;
                                     print_warning(handler,fn_decl,gimple_location(stmt),fatal);
                                     all_ok=false;
@@ -632,7 +633,6 @@ struct handler_check_pass : gimple_opt_pass
                                     obj.not_safe=true;
                                     print_warning(handler,fn_decl,gimple_location(stmt),false);
                                     all_ok=false;
-                                    obj.fatal=false;
                                     continue;
                                  }
                               }
