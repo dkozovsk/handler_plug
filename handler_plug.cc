@@ -397,7 +397,7 @@ void print_warning(tree handler,tree fnc,location_t loc,bool fatal)
       msg += " ‘";
       msg += handler_name;
       msg += "‘";
-      msg += " [-fplugin=handler_plug.so]";
+      msg += " [-fplugin=handler_plug]";
    }
    else
    {
@@ -407,7 +407,7 @@ void print_warning(tree handler,tree fnc,location_t loc,bool fatal)
       msg += " ‘\033[1;1m";
       msg += handler_name;
       msg += "\033[0m‘";
-      msg += " [\033[1;35m-fplugin=handler_plug.so\033[0m]";
+      msg += " [\033[1;35m-fplugin=handler_plug\033[0m]";
    }
    warning_at(loc,0,"%s",msg.c_str());
 }
