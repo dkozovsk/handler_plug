@@ -11,29 +11,46 @@ static bool added_new_setter=false;
 //scan functions called in signal handlers
 void handle_dependencies()
 {
-   bool solved=true;
+   bool all_solved=true;
    for (my_data &obj: fnc_list)
    {
+      bool solved=true;
       if (obj.not_safe || obj.is_ok)
          continue;
       while(solved && !obj.depends.empty())
       {
          depend_data depends=obj.depends.front();
-         bool fatal;
-         if (scan_own_function(get_name(depends.fnc),obj.not_safe,fatal))
+         bool fatal=false;
+         bool not_safe=false;
+         if (scan_own_function(get_name(depends.fnc),not_safe,fatal))
          {
-            if (obj.not_safe)
+            if (not_safe)
             {
-               obj.fatal=fatal;
+               obj.not_safe=true;
+               if (!obj.fatal)
+                  obj.fatal=fatal;
                if (obj.is_handler)
                   print_warning(depends.handler,depends.fnc,depends.loc,fatal);
+               else
+               {
+                  remember_error new_err;
+                  new_err.err_loc = depends.loc;
+                  new_err.err_fnc = depends.fnc;
+                  new_err.err_fatal = fatal;
+                  obj.err_log.push_front(new_err);
+               }
             }
             obj.depends.pop_front();
          }
          else
+         {
             solved=false;
+            all_solved=false;
+         }
       }
    }
+   if (all_solved)
+      dependencies_handled=true;
 }
 
 //returns true if fnc is already a setter
@@ -212,6 +229,8 @@ tree give_me_handler(tree var,bool first)
 //scan if the called function in signal handler is asynchronous-safe
 bool is_handler_ok_fnc (const char* name)
 {
+   if (!name)
+      return false;
    static const char* safe_fnc[]={
       "_Exit", "fexecve", "posix_trace_event", "sigprocmask", "_exit", "fork", "pselect", "sigqueue",
       "abort", "fstat", "pthread_kill", "sigset", "accept", "fstatat", "pthread_self", "sigsuspend",
