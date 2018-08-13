@@ -16,7 +16,6 @@
 // struct for remembering dependencies across functions
 struct depend_data {
   tree fnc;
-  tree handler;
   location_t loc;
 };
 

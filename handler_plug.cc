@@ -30,7 +30,7 @@ void handle_dependencies()
                if (!obj.fatal)
                   obj.fatal=fatal;
                if (obj.is_handler)
-                  print_warning(depends.handler,depends.fnc,depends.loc,fatal);
+                  print_warning(obj.fnc_tree,depends.fnc,depends.loc,fatal);
                else
                {
                   remember_error new_err;
@@ -610,7 +610,6 @@ struct handler_check_pass : gimple_opt_pass
                               depend_data save_dependencies;
                               save_dependencies.loc = (gimple_location(stmt));
                               save_dependencies.fnc = fn_decl;
-                              save_dependencies.handler=handler;
                               bool fatal;
                               bool not_safe=false;
                               //in case of recurse do nothing
