@@ -22,7 +22,8 @@ void handle_dependencies()
          depend_data depends=obj.depends.front();
          bool fatal=false;
          bool not_safe=false;
-         if (scan_own_function(get_name(depends.fnc),not_safe,fatal))
+         std::list<const char*> call_tree;
+         if (scan_own_function(get_name(depends.fnc),not_safe,fatal,call_tree))
          {
             if (not_safe)
             {
@@ -290,8 +291,14 @@ bool is_handler_wrong_fnc(const char* name)
 }
 
 //scan user declared function in signal handler
-bool scan_own_function (const char* name,bool &not_safe,bool &fatal)
+bool scan_own_function (const char* name,bool &not_safe,bool &fatal,std::list<const char*> &call_tree)
 {
+   for (const char* fnc: call_tree)
+   {
+      if (strcmp(name,fnc)==0)
+         return true;
+   }
+   call_tree.push_back(name);
    fatal=false;
    basic_block bb;
    bool all_ok=false;
@@ -303,10 +310,14 @@ bool scan_own_function (const char* name,bool &not_safe,bool &fatal)
          {
             not_safe=true;
             fatal=obj.fatal;
+            call_tree.pop_back();
             return true;
          }
          if (obj.is_ok)
+         {
+            call_tree.pop_back();
             return true;
+         }
          all_ok=true;
          FOR_ALL_BB_FN(bb, obj.fun)
          {
@@ -330,7 +341,7 @@ bool scan_own_function (const char* name,bool &not_safe,bool &fatal)
                      // in case of recurse, do nothing
                      if (strcmp(get_name(obj.fnc_tree),called_function_name)==0)
                         ;
-                     else if (scan_own_function(called_function_name,obj.not_safe,fatal))
+                     else if (scan_own_function(called_function_name,obj.not_safe,fatal,call_tree))
                      {
                         if (obj.not_safe)
                         {
@@ -392,10 +403,14 @@ bool scan_own_function (const char* name,bool &not_safe,bool &fatal)
          }
          // if everything scaned succefully function is asynchronous-safe
          if (not_safe)
+         {
+            call_tree.pop_back();
             return true;
+         }
          obj.is_ok=all_ok;
       }
    }
+   call_tree.pop_back();
    return all_ok;
 }
 
@@ -612,10 +627,11 @@ struct handler_check_pass : gimple_opt_pass
                               save_dependencies.fnc = fn_decl;
                               bool fatal;
                               bool not_safe=false;
+                              std::list<const char*> call_tree;
                               //in case of recurse do nothing
                               if (strcmp(get_name(obj.fnc_tree),name)==0)
                                  ;
-                              else if (scan_own_function(name,not_safe,fatal))
+                              else if (scan_own_function(name,not_safe,fatal,call_tree))
                               {
                                  if (not_safe)
                                  {

@@ -52,7 +52,7 @@ struct my_data {
 void handle_dependencies();
 bool is_handler_ok_fnc (const char* name);
 bool is_handler_wrong_fnc(const char* name);
-bool scan_own_function (const char* name,bool &not_safe,bool &fatal);
+bool scan_own_function (const char* name,bool &not_safe,bool &fatal,std::list<const char*> &call_tree);
 tree give_me_handler(tree var,bool first);
 tree scan_own_handler_setter(gimple* stmt, tree fun_decl);
 inline void print_warning(tree handler,tree fnc,location_t loc,bool fatal);
