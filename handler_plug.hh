@@ -44,9 +44,13 @@ struct my_data {
     bool is_ok=false;
     bool not_safe=false;
     bool was_err=false;
-    bool fatal=false;
+    bool fatal=false; 
     std::list<remember_error> err_log;
     std::list<depend_data> depends;
+    
+    bool errno_changed=false;
+    location_t errno_loc;
+    std::list<const char*> stored_errno;
     
 };
 void handle_dependencies();
@@ -56,3 +60,6 @@ bool scan_own_function (const char* name,bool &not_safe,bool &fatal,std::list<co
 tree give_me_handler(tree var,bool first);
 tree scan_own_handler_setter(gimple* stmt, tree fun_decl);
 inline void print_warning(tree handler,tree fnc,location_t loc,bool fatal);
+inline void print_errno_warning(tree handler,location_t loc);
+
+bool check_for_errno(const char *name,bool &errno_changed);

@@ -290,9 +290,27 @@ bool is_handler_wrong_fnc(const char* name)
    return false;
 }
 
+bool check_for_errno(const char *name,bool &errno_changed)
+{
+   if (!name)
+      return false;
+   static const char* change_errno_fnc[]={ 
+      "kill"};
+   for(unsigned i=0;i<(sizeof(change_errno_fnc)/sizeof(char*));++i)
+   {
+      if(strcmp(change_errno_fnc[i],name)==0)
+      {
+         errno_changed=true;
+         return true;
+      }
+   }
+   return false;
+}
+
 //scan user declared function in signal handler
 bool scan_own_function (const char* name,bool &not_safe,bool &fatal,std::list<const char*> &call_tree)
 {
+   //check for undirect recurse and should stop infinite call of this function
    for (const char* fnc: call_tree)
    {
       if (strcmp(name,fnc)==0)
@@ -445,6 +463,28 @@ void print_warning(tree handler,tree fnc,location_t loc,bool fatal)
    }
    warning_at(loc,0,"%s",msg.c_str());
 }
+inline void print_errno_warning(tree handler,location_t loc)
+{
+   const char* handler_name = get_name(handler);
+   std::string msg = "errno may be changed in signal handler";
+   if(!isatty(STDERR_FILENO))
+   {
+
+      msg += " ‘";
+      msg += handler_name;
+      msg += "‘";
+      msg += " [-fplugin=handler_plug]";
+   }
+   else
+   {
+      msg += " ‘\033[1;1m";
+      msg += handler_name;
+      msg += "\033[0m‘";
+      msg += " [\033[1;35m-fplugin=handler_plug\033[0m]";
+   }
+   warning_at(loc,0,"%s",msg.c_str());
+}
+
 
 
 // We must assert that this plugin is GPL compatible
@@ -581,6 +621,8 @@ struct handler_check_pass : gimple_opt_pass
       while(!handlers.empty())
       {
          handler=handlers.front();
+         bool errno_valid=false;
+         unsigned int errno_stored=0;
 
          if (handler != nullptr)
          {
@@ -612,6 +654,8 @@ struct handler_check_pass : gimple_opt_pass
                      for (gsi = gsi_start_bb (bb); !gsi_end_p (gsi); gsi_next (&gsi))
                      {
                         gimple * stmt = gsi_stmt (gsi);
+                        //print_gimple_stmt(stderr,stmt,0,0);
+                        //std::cerr << gimple_code(stmt) << "\n";
                         if (gimple_code(stmt)==GIMPLE_CALL)
                         {
                            tree fn_decl = gimple_call_fndecl(stmt);
@@ -652,7 +696,16 @@ struct handler_check_pass : gimple_opt_pass
                            }
                            else
                            {
-                              if(!is_handler_ok_fnc(name))
+                              if(strcmp(name,"__errno_location")==0)
+                              {
+                                 tree var = gimple_call_lhs (stmt);
+                                 if(TREE_CODE (var) == SSA_NAME)
+                                 {
+                                    errno_valid = true;
+                                    errno_stored = SSA_NAME_VERSION (var);
+                                 }
+                              }
+                              else if(!is_handler_ok_fnc(name))
                               {
                                  if (is_handler_wrong_fnc(name))
                                  {
@@ -670,9 +723,79 @@ struct handler_check_pass : gimple_opt_pass
                                     continue;
                                  }
                               }
+                              //TODO check if errno was not changed
+                              if (check_for_errno(name,obj.errno_changed))
+                                 obj.errno_loc=gimple_location(stmt);
+                           }
+                        }
+                        else if (gimple_code(stmt)==GIMPLE_ASSIGN)
+                        {
+                           //TODO check if errno was stored and restored
+                           //TODO more possible conditions, extend errno check
+                           tree var = gimple_assign_rhs1 (stmt);
+                           if (var)
+                           {
+                              if (TREE_CODE (var) == VAR_DECL)
+                              {
+                                 const char* name = get_name(var);
+                                 if (name)
+                                 {
+                                    for(const char* errno_in_var : obj.stored_errno)
+                                    {
+                                       if(strcmp(name,errno_in_var)==0)
+                                       {
+                                          var = gimple_assign_lhs (stmt);
+                                          if (TREE_CODE (var) == MEM_REF)
+                                          {
+                                             var = TREE_OPERAND (var, 0);
+                                             if(TREE_CODE (var) == SSA_NAME)
+                                             {
+                                                if (errno_valid)
+                                                {
+                                                   errno_valid=false;
+                                                   if (errno_stored == SSA_NAME_VERSION (var))
+                                                   {
+                                                      obj.errno_changed = false;
+                                                      //std::cerr << "errno restored\n";
+                                                   } 
+                                                }
+                                             }
+                                          }
+                                       }
+                                    }
+                                 }
+                              }
+                              else if (TREE_CODE (var) == MEM_REF)
+                              {
+                                 //TODO get name of mem_ref variable
+                                 var = TREE_OPERAND (var, 0);
+                                 if(TREE_CODE (var) == SSA_NAME)
+                                 {
+                                    if (errno_valid && !obj.errno_changed)
+                                    {
+                                       errno_valid=false;
+                                       if (errno_stored == SSA_NAME_VERSION (var))
+                                       {
+                                          var = gimple_assign_lhs (stmt);
+                                          if (TREE_CODE (var) == VAR_DECL)
+                                          {
+                                             const char* name = get_name(var);
+                                             if (name)
+                                                obj.stored_errno.push_front(name);
+                                             //std::cerr << "errno stored in variable " << name << "\n";
+                                          }
+                                       } 
+                                    }
+                                 }
+                              }
                            }
                         }
                      }
+                  }
+                  //TODO if errno changed, print warning
+                  if (obj.errno_changed)
+                  {
+                     print_errno_warning(handler,obj.errno_loc);
                   }
                   // if everything scaned succefully handler is ok
                   obj.is_ok=all_ok;
