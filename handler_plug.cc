@@ -295,7 +295,24 @@ bool check_for_errno(const char *name,bool &errno_changed)
    if (!name)
       return false;
    static const char* change_errno_fnc[]={ 
-      "kill"};
+      "accept", "access", "aio_return", "aio_suspend", "bind", "cfsetispeed",
+      "cfsetospeed", "chdir", "chmod", "chown", "clock_gettime", "close",
+      "connect", "creat", "dup", "dup2", "execl", "execle", "execv", "execve",
+      "faccessat", "fchdir", "fchmod", "fchmodat", "fchown", "fchownat", "fcntl",
+      "fdatasync", "fexecve", "fork", "fstat", "fstatat", "fsync", "ftruncate",
+      "futimens", "getgroups", "getpeername", "getsockname", "getsockopt", "kill",
+      "link", "linkat", "listen", "lseek", "lstat", "mkdir", "mkdirat", "mkfifo",
+      "mkfifoat", "mknod", "mknodat", "open", "openat", "pause", "pipe", "poll",
+      "pselect", "read", "readlink", "readlinkat", "recv", "recvfrom", "recvmsg",
+      "rename", "renameat", "rmdir", "select", "sem_post", "send", "sendmsg",
+      "sendto", "setgid", "setpgid", "setsid", "setsockopt", "setuid", "shutdown",
+      "sigaction", "sigaddset", "sigdelset", "sigemptyset", "sigismember", "signal",
+      "sigpause", "sigpending", "sigprocmask", "sigqueue", "sigset", "sigsuspend",
+      "sockatmark", "socket", "socketpair", "stat", "symlink", "symlinkat",
+      "tcdrain", "tcflow", "tcflush", "tcgetattr", "tcgetpgrp", "tcsendbreak",
+      "tcsetattr" "tcsetpgrp", "time", "timer_getoverrun", "timer_gettime",
+      "timer_settime", "times", "uname", "unlink", "unlinkat", "utime",
+      "utimensat" "utimes", "wait", "waitpid", "write"};
    for(unsigned i=0;i<(sizeof(change_errno_fnc)/sizeof(char*));++i)
    {
       if(strcmp(change_errno_fnc[i],name)==0)
