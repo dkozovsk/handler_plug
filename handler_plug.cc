@@ -337,6 +337,11 @@ bool scan_own_function (const char* name,bool &not_safe,bool &fatal,std::list<co
    fatal=false;
    basic_block bb;
    bool all_ok=false;
+   
+   bool errno_valid=false;
+   unsigned int errno_stored=0;
+   std::list<const char*> errno_ptr;
+   
    for (my_data &obj: fnc_list)
    {
       if (strcmp(get_name(obj.fnc_tree),name)==0)
@@ -401,7 +406,24 @@ bool scan_own_function (const char* name,bool &not_safe,bool &fatal,std::list<co
                   }
                   else
                   {
-                     if(!is_handler_ok_fnc(called_function_name))
+                     if(strcmp(name,"__errno_location")==0)
+                     {
+                        tree var = gimple_call_lhs (stmt);
+                        if(TREE_CODE (var) == SSA_NAME)
+                        {
+                           errno_valid = true;
+                           errno_stored = SSA_NAME_VERSION (var);
+                        }
+                        else if(TREE_CODE (var) == VAR_DECL)
+                        {
+                           const char* var_name = get_name(var);
+                           if (var_name)
+                           {
+                              errno_ptr.push_front(var_name);
+                           }
+                        }
+                     }
+                     else if(!is_handler_ok_fnc(called_function_name))
                      {
                         if (is_handler_wrong_fnc(called_function_name))
                         {
@@ -430,6 +452,131 @@ bool scan_own_function (const char* name,bool &not_safe,bool &fatal,std::list<co
                            if (!obj.fatal)
                               obj.fatal=false;
                            continue;
+                        }
+                     }
+                     //check if errno was not changed
+                     //TODO possible extend this into handler ok fncs
+                     if (check_for_errno(called_function_name,obj.errno_changed))
+                        obj.errno_loc=gimple_location(stmt);
+                     
+                  }
+               }
+               else if (gimple_code(stmt)==GIMPLE_ASSIGN)
+               {
+                  //check if errno was stored or restored
+                  //TODO more possible conditions, extend errno check
+                  tree r_var = gimple_assign_rhs1 (stmt);
+                  tree l_var = gimple_assign_lhs (stmt);
+                  if (r_var && l_var)
+                  {
+                     //TODO maybe stored to another place from already stored errno(rare)
+                     if (TREE_CODE (l_var) == MEM_REF)
+                     {
+                        //get ID of mem_ref SSA_NAME variable(build in variable)
+                        l_var = TREE_OPERAND (l_var, 0);
+                        if (l_var)
+                        {
+                           if(TREE_CODE (l_var) == SSA_NAME)
+                           {
+                              if (errno_valid)
+                              {
+                                 if (errno_stored == SSA_NAME_VERSION (l_var))
+                                 {
+                                    if (TREE_CODE (r_var) == VAR_DECL)
+                                    {
+                                       const char* name = get_name(r_var);
+                                       if (name)
+                                       {
+                                          obj.errno_changed=true;
+                                          for(const char* errno_in_var : obj.stored_errno)
+                                          {
+                                             if(strcmp(name,errno_in_var)==0)
+                                             {
+                                                obj.errno_changed=false;
+                                             }
+                                          }
+                                       }
+                                    }
+                                    else
+                                    {
+                                       obj.errno_changed=true;
+                                    }
+                                 } 
+                              }
+                           }
+                           else if (TREE_CODE (l_var) == VAR_DECL)
+                           {
+                              const char* name = get_name(l_var);
+                              for(const char* errno_ref : errno_ptr)
+                              {
+                                 if (strcmp(name,errno_ref)==0)
+                                 {
+                                    if (TREE_CODE (r_var) == VAR_DECL)
+                                    {
+                                       name = get_name(r_var);
+                                       if (name)
+                                       {
+                                          obj.errno_changed=true;
+                                          for(const char* errno_in_var : obj.stored_errno)
+                                          {
+                                             if(strcmp(name,errno_in_var)==0)
+                                             {
+                                                obj.errno_changed=false;
+                                             }
+                                          }
+                                       }
+                                    }
+                                    else
+                                    {
+                                       obj.errno_changed=true;
+                                    }
+                                    break;
+                                 }
+                              }
+                           }
+                        }
+                     }
+                     else if (TREE_CODE (r_var) == MEM_REF)
+                     {
+                        //get ID of mem_ref SSA_NAME variable(build in variable)
+                        r_var = TREE_OPERAND (r_var, 0);
+                        if (r_var)
+                        {
+                           if(TREE_CODE (r_var) == SSA_NAME)
+                           {
+                              if (errno_valid && !obj.errno_changed)
+                              {
+                                 if (errno_stored == SSA_NAME_VERSION (r_var))
+                                 {
+                                    if (TREE_CODE (l_var) == VAR_DECL)
+                                    {
+                                       const char* name = get_name(l_var);
+                                       if (name)
+                                          obj.stored_errno.push_front(name);
+                                    }
+                                 } 
+                              }
+                           }
+                           else if(TREE_CODE (r_var) == VAR_DECL)
+                           {
+                              const char* name = get_name(r_var);
+                              for(const char* errno_ref : errno_ptr)
+                              {
+                                 if (strcmp(name,errno_ref)==0)
+                                 {
+                                    if(!obj.errno_changed)
+                                    {
+                                       if (TREE_CODE (l_var) == VAR_DECL)
+                                       {
+                                          name = get_name(l_var);
+                                          if (name)
+                                             obj.stored_errno.push_front(name);
+                                       }
+                                    }
+                                    break;
+                                 }
+                              }
+                           }
                         }
                      }
                   }
@@ -645,6 +792,7 @@ struct handler_check_pass : gimple_opt_pass
          handler=handlers.front();
          bool errno_valid=false;
          unsigned int errno_stored=0;
+         std::list<const char*> errno_ptr;
 
          if (handler != nullptr)
          {
@@ -655,6 +803,8 @@ struct handler_check_pass : gimple_opt_pass
                {
                   handlers.pop_front();
                   found=true;
+                  if (obj.errno_changed && !obj.is_handler)
+                        print_errno_warning(handler,obj.errno_loc);
                   if ((obj.is_handler && obj.not_safe) || obj.is_ok)
                      break;
                   obj.is_handler=true;
@@ -729,7 +879,11 @@ struct handler_check_pass : gimple_opt_pass
                                  }
                                  else if(TREE_CODE (var) == VAR_DECL)
                                  {
-                                    ;//TODO maybe he stored pointer to errno
+                                    const char* name = get_name(var);
+                                    if (name)
+                                    {
+                                       errno_ptr.push_front(name);
+                                    }
                                  }
                               }
                               else if(!is_handler_ok_fnc(name))
@@ -751,7 +905,7 @@ struct handler_check_pass : gimple_opt_pass
                                  }
                               }
                               //check if errno was not changed
-                              //TODO possible extend this into handler ok fncs, and wrong fncs
+                              //TODO possible extend this into handler ok fncs
                               if (check_for_errno(name,obj.errno_changed))
                                  obj.errno_loc=gimple_location(stmt);
                            }
@@ -764,7 +918,6 @@ struct handler_check_pass : gimple_opt_pass
                            tree l_var = gimple_assign_lhs (stmt);
                            if (r_var && l_var)
                            {
-                              //TODO maybe destroy errno directly[assign something to errno(uncommon, maybe own function using errno ?)]
                               //TODO maybe stored to another place from already stored errno(rare)
                               if (TREE_CODE (l_var) == MEM_REF)
                               {
@@ -800,6 +953,36 @@ struct handler_check_pass : gimple_opt_pass
                                           } 
                                        }
                                     }
+                                    else if (TREE_CODE (l_var) == VAR_DECL)
+                                    {
+                                       const char* name = get_name(l_var);
+                                       for(const char* errno_ref : errno_ptr)
+                                       {
+                                          if (strcmp(name,errno_ref)==0)
+                                          {
+                                             if (TREE_CODE (r_var) == VAR_DECL)
+                                             {
+                                                name = get_name(r_var);
+                                                if (name)
+                                                {
+                                                   obj.errno_changed=true;
+                                                   for(const char* errno_in_var : obj.stored_errno)
+                                                   {
+                                                      if(strcmp(name,errno_in_var)==0)
+                                                      {
+                                                         obj.errno_changed=false;
+                                                      }
+                                                   }
+                                                }
+                                             }
+                                             else
+                                             {
+                                                obj.errno_changed=true;
+                                             }
+                                             break;
+                                          }
+                                       }
+                                    }
                                  }
                               }
                               else if (TREE_CODE (r_var) == MEM_REF)
@@ -822,6 +1005,26 @@ struct handler_check_pass : gimple_opt_pass
                                                 //std::cerr << "errno stored in variable " << name << "\n";
                                              }
                                           } 
+                                       }
+                                    }
+                                    else if(TREE_CODE (r_var) == VAR_DECL)
+                                    {
+                                       const char* name = get_name(r_var);
+                                       for(const char* errno_ref : errno_ptr)
+                                       {
+                                          if (strcmp(name,errno_ref)==0)
+                                          {
+                                             if(!obj.errno_changed)
+                                             {
+                                                if (TREE_CODE (l_var) == VAR_DECL)
+                                                {
+                                                   name = get_name(l_var);
+                                                   if (name)
+                                                      obj.stored_errno.push_front(name);
+                                                }
+                                             }
+                                             break;
+                                          }
                                        }
                                     }
                                  }
