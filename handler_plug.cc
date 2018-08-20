@@ -23,7 +23,8 @@ void handle_dependencies() //TODO maybe check errno [somewhat problemathic,not i
          bool fatal=false;
          bool not_safe=false;
          std::list<const char*> call_tree;
-         if (scan_own_function(get_name(depends.fnc),not_safe,fatal,call_tree))
+         bool errno_changed=false;
+         if (scan_own_function(get_name(depends.fnc),not_safe,fatal,errno_changed,call_tree,nullptr))
          {
             if (not_safe)
             {
@@ -325,7 +326,7 @@ bool check_for_errno(const char *name,bool &errno_changed)
 }
 
 //scan user declared function in signal handler
-bool scan_own_function (const char* name,bool &not_safe,bool &fatal,std::list<const char*> &call_tree) //TODO add check errno here too
+bool scan_own_function (const char* name, bool &not_safe, bool &fatal, bool &errno_err, std::list<const char*> &call_tree,bool *handler_found) 
 {
    //check for undirect recurse and should stop infinite call of this function
    for (const char* fnc: call_tree)
@@ -334,7 +335,6 @@ bool scan_own_function (const char* name,bool &not_safe,bool &fatal,std::list<co
          return true;
    }
    call_tree.push_back(name);
-   fatal=false;
    basic_block bb;
    bool all_ok=false;
    
@@ -346,17 +346,41 @@ bool scan_own_function (const char* name,bool &not_safe,bool &fatal,std::list<co
    {
       if (strcmp(get_name(obj.fnc_tree),name)==0)
       {
-         if (obj.not_safe)
+         if (handler_found != nullptr)
          {
-            not_safe=true;
-            fatal=obj.fatal;
-            call_tree.pop_back();
-            return true;
+            *handler_found=true;
+            if (obj.errno_changed && !obj.is_handler)
+               print_errno_warning(obj.fnc_tree,obj.errno_loc);
+            if (obj.is_handler &&  (obj.not_safe || obj.is_ok) )
+               return true;
+            obj.is_handler=true;
+            if (obj.is_ok)
+               return true;
+            if (obj.not_safe)
+            {
+               while (!obj.err_log.empty())
+               {
+                  remember_error err = obj.err_log.front();
+                  print_warning(obj.fnc_tree,err.err_fnc,err.err_loc,err.err_fatal);
+                  obj.err_log.pop_front();
+               }
+               break;
+            }
          }
-         if (obj.is_ok)
+         else 
          {
-            call_tree.pop_back();
-            return true;
+            if (obj.not_safe)
+            {
+               not_safe=true;
+               fatal=obj.fatal;
+               call_tree.pop_back();
+               return true;
+            }
+            if (obj.is_ok)
+            {
+               call_tree.pop_back();
+               return true;
+            }
          }
          all_ok=true;
          FOR_ALL_BB_FN(bb, obj.fun)
@@ -378,27 +402,50 @@ bool scan_own_function (const char* name,bool &not_safe,bool &fatal,std::list<co
                      depend_data save_dependencies;
                      save_dependencies.loc = gimple_location(stmt);
                      save_dependencies.fnc = fn_decl;
+                     bool fatal_call=false;
+                     bool call_not_safe=false;
+                     bool call_errno_changed=false;
                      // in case of recurse, do nothing
                      if (strcmp(get_name(obj.fnc_tree),called_function_name)==0)
                         ;
-                     else if (scan_own_function(called_function_name,obj.not_safe,fatal,call_tree))
+                     else if (scan_own_function(called_function_name,call_not_safe,fatal_call,call_errno_changed,call_tree,nullptr))
                      {
-                        if (obj.not_safe)
+                        if (call_errno_changed)
                         {
-                           remember_error new_err;
-                           new_err.err_loc = gimple_location(stmt);
-                           new_err.err_fnc = fn_decl;
-                           new_err.err_fatal = fatal;
-                           obj.err_log.push_front(new_err);
+                           obj.errno_changed=true;
+                           obj.errno_loc=gimple_location(stmt);
+                        }
+                        if (call_not_safe)
+                        {
+                           all_ok=false;
+                           obj.not_safe=true;
                            
+                           if (handler_found != nullptr)
+                              print_warning(obj.fnc_tree,fn_decl,gimple_location(stmt),fatal_call);
+                           else
+                           {
+                              remember_error new_err;
+                              new_err.err_loc = gimple_location(stmt);
+                              new_err.err_fnc = fn_decl;
+                              new_err.err_fatal = fatal_call;
+                              obj.err_log.push_front(new_err);
+                           }
+                        
                            not_safe=true;
                            if (!obj.fatal)
-                              obj.fatal=fatal;
+                              obj.fatal=fatal_call;
+                           if (!fatal)
+                              fatal=fatal_call;
                            continue;
                         }
                      }
                      else
                      {
+                        if (call_errno_changed)
+                        {
+                           obj.errno_changed=true;
+                           obj.errno_loc=gimple_location(stmt);
+                        }
                         all_ok=false;
                         dependencies_handled=false;
                         obj.depends.push_front(save_dependencies);
@@ -406,7 +453,7 @@ bool scan_own_function (const char* name,bool &not_safe,bool &fatal,std::list<co
                   }
                   else
                   {
-                     if(strcmp(name,"__errno_location")==0)
+                     if(strcmp(called_function_name,"__errno_location")==0)
                      {
                         tree var = gimple_call_lhs (stmt);
                         if(TREE_CODE (var) == SSA_NAME)
@@ -427,11 +474,18 @@ bool scan_own_function (const char* name,bool &not_safe,bool &fatal,std::list<co
                      {
                         if (is_handler_wrong_fnc(called_function_name))
                         {
-                           remember_error new_err;
-                           new_err.err_loc = gimple_location(stmt);
-                           new_err.err_fnc = fn_decl;
-                           new_err.err_fatal = true;
-                           obj.err_log.push_front(new_err);
+                           all_ok=false;
+                           
+                           if (handler_found != nullptr)
+                              print_warning(obj.fnc_tree,fn_decl,gimple_location(stmt),true);
+                           else
+                           {
+                              remember_error new_err;
+                              new_err.err_loc = gimple_location(stmt);
+                              new_err.err_fnc = fn_decl;
+                              new_err.err_fatal = true;
+                              obj.err_log.push_front(new_err);
+                           }
                            
                            obj.not_safe=true;
                            not_safe=true;
@@ -441,16 +495,21 @@ bool scan_own_function (const char* name,bool &not_safe,bool &fatal,std::list<co
                         }
                         else
                         {
-                           remember_error new_err;
-                           new_err.err_loc = gimple_location(stmt);
-                           new_err.err_fnc = fn_decl;
-                           new_err.err_fatal = false;
-                           obj.err_log.push_front(new_err);
+                           all_ok=false;
+                           
+                           if (handler_found != nullptr)
+                              print_warning(obj.fnc_tree,fn_decl,gimple_location(stmt),false);
+                           else
+                           {
+                              remember_error new_err;
+                              new_err.err_loc = gimple_location(stmt);
+                              new_err.err_fnc = fn_decl;
+                              new_err.err_fatal = false;
+                              obj.err_log.push_front(new_err);
+                           }
                            
                            obj.not_safe=true;
                            not_safe=true;
-                           if (!obj.fatal)
-                              obj.fatal=false;
                            continue;
                         }
                      }
@@ -583,12 +642,14 @@ bool scan_own_function (const char* name,bool &not_safe,bool &fatal,std::list<co
                }
             }
          }
-         // if everything scaned succefully function is asynchronous-safe
+         if (handler_found != nullptr && obj.errno_changed)
+            print_errno_warning(obj.fnc_tree,obj.errno_loc);
          if (not_safe)
          {
             call_tree.pop_back();
             return true;
          }
+         // if everything scaned succefully function is asynchronous-safe
          obj.is_ok=all_ok;
       }
    }
@@ -790,261 +851,19 @@ struct handler_check_pass : gimple_opt_pass
       while(!handlers.empty())
       {
          handler=handlers.front();
-         bool errno_valid=false;
-         unsigned int errno_stored=0;
-         std::list<const char*> errno_ptr;
 
          if (handler != nullptr)
          {
             bool found=false;
-            for (my_data &obj: fnc_list)
-            {
-               if (strcmp(get_name(obj.fnc_tree),get_name(handler))==0)
-               {
-                  handlers.pop_front();
-                  found=true;
-                  if (obj.errno_changed && !obj.is_handler)
-                        print_errno_warning(handler,obj.errno_loc);
-                  if ((obj.is_handler && obj.not_safe) || obj.is_ok)
-                     break;
-                  obj.is_handler=true;
-                  if (obj.not_safe)
-                  {
-                     while (!obj.err_log.empty())
-                     {
-                        remember_error err = obj.err_log.front();
-                        print_warning(handler,err.err_fnc,err.err_loc,err.err_fatal);
-                        obj.err_log.pop_front();
-                     }
-                     break;
-                  }
-                  bool all_ok=true;
-                  basic_block bb;
-                  FOR_ALL_BB_FN(bb, obj.fun)
-                  {
-                     gimple_stmt_iterator gsi;
-                     for (gsi = gsi_start_bb (bb); !gsi_end_p (gsi); gsi_next (&gsi))
-                     {
-                        gimple * stmt = gsi_stmt (gsi);
-                        //print_gimple_stmt(stderr,stmt,0,0);
-                        //std::cerr << gimple_code(stmt) << "\n";
-                        if (gimple_code(stmt)==GIMPLE_CALL)
-                        {
-                           tree fn_decl = gimple_call_fndecl(stmt);
-                           if (!fn_decl)
-                              continue;
-                           const char* name = get_name(fn_decl);
-                           if (!name)
-                              continue;
-                           if (DECL_INITIAL  (fn_decl))
-                           {
-                              depend_data save_dependencies;
-                              save_dependencies.loc = (gimple_location(stmt));
-                              save_dependencies.fnc = fn_decl;
-                              bool fatal;
-                              bool not_safe=false;
-                              std::list<const char*> call_tree;
-                              //in case of recurse do nothing
-                              if (strcmp(get_name(obj.fnc_tree),name)==0)
-                                 ;
-                              else if (scan_own_function(name,not_safe,fatal,call_tree))
-                              {
-                                 if (not_safe)
-                                 {
-                                    if (!obj.fatal)
-                                       obj.fatal=fatal;
-                                    obj.not_safe=true;
-                                    print_warning(handler,fn_decl,gimple_location(stmt),fatal);
-                                    all_ok=false;
-                                    continue;
-                                 }
-                              }
-                              else
-                              {
-                                 all_ok=false;
-                                 dependencies_handled=false;
-                                 obj.depends.push_front(save_dependencies);
-                              }
-                           }
-                           else
-                           {
-                              //this function occurs when errno is used, possible store or restore of errno
-                              if(strcmp(name,"__errno_location")==0)
-                              {
-                                 tree var = gimple_call_lhs (stmt);
-                                 if(TREE_CODE (var) == SSA_NAME)
-                                 {
-                                    errno_valid = true;
-                                    errno_stored = SSA_NAME_VERSION (var);
-                                 }
-                                 else if(TREE_CODE (var) == VAR_DECL)
-                                 {
-                                    const char* name = get_name(var);
-                                    if (name)
-                                    {
-                                       errno_ptr.push_front(name);
-                                    }
-                                 }
-                              }
-                              else if(!is_handler_ok_fnc(name))
-                              {
-                                 if (is_handler_wrong_fnc(name))
-                                 {
-                                    obj.not_safe=true;
-                                    print_warning(handler,fn_decl,gimple_location(stmt),true);
-                                    all_ok=false;
-                                    obj.fatal=true;
-                                    continue;
-                                 }
-                                 else
-                                 {
-                                    obj.not_safe=true;
-                                    print_warning(handler,fn_decl,gimple_location(stmt),false);
-                                    all_ok=false;
-                                    continue;
-                                 }
-                              }
-                              //check if errno was not changed
-                              //TODO possible extend this into handler ok fncs
-                              if (check_for_errno(name,obj.errno_changed))
-                                 obj.errno_loc=gimple_location(stmt);
-                           }
-                        }
-                        else if (gimple_code(stmt)==GIMPLE_ASSIGN)
-                        {
-                           //check if errno was stored or restored
-                           //TODO more possible conditions, extend errno check
-                           tree r_var = gimple_assign_rhs1 (stmt);
-                           tree l_var = gimple_assign_lhs (stmt);
-                           if (r_var && l_var)
-                           {
-                              //TODO maybe stored to another place from already stored errno(rare)
-                              if (TREE_CODE (l_var) == MEM_REF)
-                              {
-                                 //get ID of mem_ref SSA_NAME variable(build in variable)
-                                 l_var = TREE_OPERAND (l_var, 0);
-                                 if (l_var)
-                                 {
-                                    if(TREE_CODE (l_var) == SSA_NAME)
-                                    {
-                                       if (errno_valid)
-                                       {
-                                          if (errno_stored == SSA_NAME_VERSION (l_var))
-                                          {
-                                             if (TREE_CODE (r_var) == VAR_DECL)
-                                             {
-                                                const char* name = get_name(r_var);
-                                                if (name)
-                                                {
-                                                   obj.errno_changed=true;
-                                                   for(const char* errno_in_var : obj.stored_errno)
-                                                   {
-                                                      if(strcmp(name,errno_in_var)==0)
-                                                      {
-                                                         obj.errno_changed=false;
-                                                      }
-                                                   }
-                                                }
-                                             }
-                                             else
-                                             {
-                                                obj.errno_changed=true;
-                                             }
-                                          } 
-                                       }
-                                    }
-                                    else if (TREE_CODE (l_var) == VAR_DECL)
-                                    {
-                                       const char* name = get_name(l_var);
-                                       for(const char* errno_ref : errno_ptr)
-                                       {
-                                          if (strcmp(name,errno_ref)==0)
-                                          {
-                                             if (TREE_CODE (r_var) == VAR_DECL)
-                                             {
-                                                name = get_name(r_var);
-                                                if (name)
-                                                {
-                                                   obj.errno_changed=true;
-                                                   for(const char* errno_in_var : obj.stored_errno)
-                                                   {
-                                                      if(strcmp(name,errno_in_var)==0)
-                                                      {
-                                                         obj.errno_changed=false;
-                                                      }
-                                                   }
-                                                }
-                                             }
-                                             else
-                                             {
-                                                obj.errno_changed=true;
-                                             }
-                                             break;
-                                          }
-                                       }
-                                    }
-                                 }
-                              }
-                              else if (TREE_CODE (r_var) == MEM_REF)
-                              {
-                                 //get ID of mem_ref SSA_NAME variable(build in variable)
-                                 r_var = TREE_OPERAND (r_var, 0);
-                                 if (r_var)
-                                 {
-                                    if(TREE_CODE (r_var) == SSA_NAME)
-                                    {
-                                       if (errno_valid && !obj.errno_changed)
-                                       {
-                                          if (errno_stored == SSA_NAME_VERSION (r_var))
-                                          {
-                                             if (TREE_CODE (l_var) == VAR_DECL)
-                                             {
-                                                const char* name = get_name(l_var);
-                                                if (name)
-                                                   obj.stored_errno.push_front(name);
-                                                //std::cerr << "errno stored in variable " << name << "\n";
-                                             }
-                                          } 
-                                       }
-                                    }
-                                    else if(TREE_CODE (r_var) == VAR_DECL)
-                                    {
-                                       const char* name = get_name(r_var);
-                                       for(const char* errno_ref : errno_ptr)
-                                       {
-                                          if (strcmp(name,errno_ref)==0)
-                                          {
-                                             if(!obj.errno_changed)
-                                             {
-                                                if (TREE_CODE (l_var) == VAR_DECL)
-                                                {
-                                                   name = get_name(l_var);
-                                                   if (name)
-                                                      obj.stored_errno.push_front(name);
-                                                }
-                                             }
-                                             break;
-                                          }
-                                       }
-                                    }
-                                 }
-                              }
-                           }
-                        }
-                     }
-                  }
-                  //if errno has changed, print warning
-                  if (obj.errno_changed)
-                  {
-                     print_errno_warning(handler,obj.errno_loc);
-                  }
-                  // if everything scaned succefully handler is ok
-                  obj.is_ok=all_ok;
-                  break;
-               }
-            }
+            bool fatal=false;
+            bool not_safe=false;
+            bool errno_changed=false;
+            std::list<const char*> call_tree;
+            scan_own_function(get_name(handler),not_safe,fatal,errno_changed,call_tree,&found);
             if (!found)
                break;
+            else
+               handlers.pop_front();
          }
          else
             handlers.pop_front();
