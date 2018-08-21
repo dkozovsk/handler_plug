@@ -8,6 +8,8 @@ static std::list<handler_setter> own_setters;
 static bool dependencies_handled=true;
 static bool added_new_setter=false;
 
+static const char * const plugin_name = "handler_plug";
+
 //scan functions called in signal handlers
 void handle_dependencies() //TODO maybe check errno [somewhat problemathic,not impossible(extend structure ?)]
 {
@@ -39,7 +41,7 @@ void handle_dependencies() //TODO maybe check errno [somewhat problemathic,not i
                   new_err.err_loc = depends.loc;
                   new_err.err_fnc = depends.fnc;
                   new_err.err_fatal = fatal;
-                  obj.err_log.push_front(new_err);
+                  obj.err_log.push_back(new_err);
                }
             }
             obj.depends.pop_front();
@@ -409,7 +411,7 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                               new_err.err_loc = gimple_location(stmt);
                               new_err.err_fnc = fn_decl;
                               new_err.err_fatal = fatal_call;
-                              obj.err_log.push_front(new_err);
+                              obj.err_log.push_back(new_err);
                            }
                         
                            not_safe=true;
@@ -465,7 +467,7 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                               new_err.err_loc = gimple_location(stmt);
                               new_err.err_fnc = fn_decl;
                               new_err.err_fatal = true;
-                              obj.err_log.push_front(new_err);
+                              obj.err_log.push_back(new_err);
                            }
                            
                            obj.not_safe=true;
@@ -486,7 +488,7 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                               new_err.err_loc = gimple_location(stmt);
                               new_err.err_fnc = fn_decl;
                               new_err.err_fatal = false;
-                              obj.err_log.push_front(new_err);
+                              obj.err_log.push_back(new_err);
                            }
                            
                            obj.not_safe=true;
@@ -655,7 +657,9 @@ void print_warning(tree handler,tree fnc,location_t loc,bool fatal)
       msg += " ‘";
       msg += handler_name;
       msg += "‘";
-      msg += " [-fplugin=handler_plug]";
+      msg += " [-fplugin=";
+      msg += plugin_name;
+      msg += "]";
    }
    else
    {
@@ -665,7 +669,9 @@ void print_warning(tree handler,tree fnc,location_t loc,bool fatal)
       msg += " ‘\033[1;1m";
       msg += handler_name;
       msg += "\033[0m‘";
-      msg += " [\033[1;35m-fplugin=handler_plug\033[0m]";
+      msg += " [\033[1;35m-fplugin=";
+      msg += plugin_name;
+      msg += "\033[0m]";
    }
    warning_at(loc,0,"%s",msg.c_str());
 }
@@ -681,14 +687,18 @@ inline void print_errno_warning(tree handler,location_t loc)
       msg += " ‘";
       msg += handler_name;
       msg += "‘";
-      msg += " [-fplugin=handler_plug]";
+      msg += " [-fplugin=";
+      msg += plugin_name;
+      msg += "]";
    }
    else
    {
       msg += " ‘\033[1;1m";
       msg += handler_name;
       msg += "\033[0m‘";
-      msg += " [\033[1;35m-fplugin=handler_plug\033[0m]";
+      msg += " [\033[1;35m-fplugin=";
+      msg += plugin_name;
+      msg += "\033[0m]";
    }
    warning_at(loc,0,"%s",msg.c_str());
 }
