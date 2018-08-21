@@ -228,35 +228,49 @@ tree give_me_handler(tree var,bool first)
    return nullptr;
 }
 
-//scan if the called function in signal handler is asynchronous-safe
-bool is_handler_ok_fnc (const char* name)
+//scan if the called function in signal handler is asynchronous-safe and if errno may be changed
+//returns 0 when function is not asynchronous-safe, 
+//        1 if it is safe and errno is not changed,
+//        2 if it is safe, but errno may be changed
+uint8_t is_handler_ok_fnc (const char* name, bool &errno_changed)
 {
    if (!name)
-      return false;
+      return 0;
    static const char* safe_fnc[]={
-      "_Exit", "fexecve", "posix_trace_event", "sigprocmask", "_exit", "fork", "pselect", "sigqueue",
-      "abort", "fstat", "pthread_kill", "sigset", "accept", "fstatat", "pthread_self", "sigsuspend",
-      "access", "fsync", "pthread_sigmask", "sleep", "aio_error", "ftruncate", "raise", "sockatmark",
-      "aio_return", "futimens", "read", "socket", "aio_suspend", "getegid", "readlink", "socketpair",
-      "alarm", "geteuid", "readlinkat", "stat", "bind", "getgid", "recv", "symlink", "cfgetispeed",
-      "getgroups", "recvfrom", "symlinkat", "cfgetospeed", "getpeername", "recvmsg", "tcdrain",
-      "cfsetispeed", "getpgrp", "rename", "tcflow", "cfsetospeed", "getpid", "renameat", "tcflush",
-      "chdir", "getppid", "rmdir", "tcgetattr", "chmod", "getsockname", "select", "tcgetpgrp", "chown",
-      "getsockopt", "sem_post", "tcsendbreak", "clock_gettime", "getuid", "send", "tcsetattr", "close",
-      "kill", "sendmsg", "tcsetpgrp", "connect", "link", "sendto", "time", "creat", "linkat", "setgid",
-      "timer_getoverrun", "dup", "listen", "setpgid", "timer_gettime", "dup", "lseek", "setsid",
-      "timer_settime", "execl", "lstat", "setsockopt", "times", "execle", "mkdir", "setuid", "umask",
-      "execv", "mkdirat", "shutdown", "uname", "execve", "mkfifo", "sigaction", "unlink", "faccessat",
-      "mkfifoat", "sigaddset", "unlinkat", "fchdir", "mknod", "sigdelset", "utime", "fchmod", "mknodat",
-      "sigemptyset", "utimensat", "fchmodat", "open", "sigfillset", "utimes", "fchown", "openat",
-      "sigismember", "wait", "fchownat", "pause", "signal", "waitpid", "fcntl", "pipe", "sigpause",
-      "write", "fdatasync", "poll", "sigpending" };
+      "abort", "aio_error", "alarm", "cfgetispeed", "cfgetospeed", "_exit",
+      "_Exit", "getegid", "geteuid", "getgid", "getpgrp", "getpid", "getppid",
+      "getuid", "posix_trace_event", "pthread_kill", "pthread_self",
+      "pthread_sigmask", "raise", "sigfillset", "sleep", "umask"};
+   static const char* change_errno_fnc[]={
+      "accept", "access", "aio_return", "aio_suspend", "bind", "cfsetispeed", "cfsetospeed",
+      "clock_gettime", "close", "connect", "creat", "dup", "dup2", "execl", "execle", "execv",
+      "execve", "faccessat", "fcntl", "fdatasync", "fexecve", "fchdir", "fchmod", "fchmodat",
+      "fchown", "fchownat", "fork", "fstat", "fstatat", "fsync", "ftruncate", "futimens",
+      "getgroups", "getpeername", "getsockname", "getsockopt", "chdir", "chmod", "chown",
+      "kill", "link", "linkat", "listen", "lseek", "lstat", "mkdir", "mkdirat", "mkfifo",
+      "mkfifoat", "mknod", "mknodat", "open", "openat", "pause", "pipe", "poll", "pselect",
+      "read", "readlink", "readlinkat", "recv", "recvfrom", "recvmsg", "rename", "renameat",
+      "rmdir", "select", "sem_post", "send", "sendmsg", "sendto", "setgid", "setpgid", "setsid",
+      "setsockopt", "setuid", "shutdown", "sigaction", "sigaddset", "sigdelset", "sigemptyset",
+      "sigismember", "signal", "sigpause", "sigpending", "sigprocmask", "sigqueue", "sigset",
+      "sigsuspend", "sockatmark", "socket", "socketpair", "stat", "symlink", "symlinkat", "tcdrain",
+      "tcflow", "tcflush", "tcgetattr", "tcgetpgrp", "tcsendbreak", "tcsetattr", "tcsetpgrp", "time",
+      "timer_getoverrun", "timer_gettime", "timer_settime", "times", "uname", "unlink", "unlinkat",
+      "utime", "utimensat", "utimes", "wait", "waitpid", "write"};
    for(unsigned i=0;i<(sizeof(safe_fnc)/sizeof(char*));++i)
    {
       if(strcmp(safe_fnc[i],name)==0)
-         return true;
+         return 1;
    }
-   return false;
+   for(unsigned i=0;i<(sizeof(change_errno_fnc)/sizeof(char*));++i)
+   {
+      if(strcmp(change_errno_fnc[i],name)==0)
+      {
+         errno_changed=true;
+         return 2;
+      }
+   }
+   return 0;
 }
 
 //scan if the called function in signal handler is asynchronous-unsafe
@@ -265,24 +279,23 @@ bool is_handler_wrong_fnc(const char* name)
    if (!name)
       return false;
    static const char* unsafe_fnc[]={
-      "malloc", "free", "grantpt", "unlockpt", "ptsname", "ptsname_r",
-      "mallinfo", "mallopt", "mtrace", "muntrace", "realloc", "reallocarray",
-      "aligned_alloc", "memalign", "posix_memalign", "valloc", "calloc",
-      "shm_open", "shm_unlink", "printf", "wprintf", "fprintf", "fwprintf",
-      "sprintf", "swprintf", "snprintf", "sem_open", "sem_close", "sem_unlink",
-      "fclose", "fcloseall", "fopen", "fopen64", "freopen", "freopen64",
-      "fgetc", "fgetwc", "fgetc_unlocked", "fgetwc_unlocked", "getc",
-      "getwc", "getc_unlocked", "getwc_unlocked", "getchar", "getwchar",
-      "getchar_unlocked", "getwchar_unlocked", "getw", "fputc", "fputwc",
-      "fputc_unlocked", "fputwc_unlocked", "putc", "putwc", "putc_unlocked",
-      "putwc_unlocked", "putchar", "putwchar", "putchar_unlocked",
-      "putwchar_unlocked", "fputs", "fputws", "fputs_unlocked",
-      "fputws_unlocked", "puts", "putw", "strerror", "strerror_r",
-      "perror", "error", "error_at_line", "warn", "vwarn", "warnx",
-      "vwarnx", "err", "verr", "errx", "verrx", "scanf", "wscanf",
-      "fscanf", "fwscanf", "sscanf", "swscanf", "exit", "longjmp",
-      "sigsetjmp", "siglongjmp", "tmpfile", "tmpfile64", "tmpnam",
-      "tempnam", "atexit", "on_exit","__builtin_putchar", "__builtin_puts"};
+      "aligned_alloc", "atexit", "__builtin_putchar", "__builtin_puts", "calloc",
+      "err", "error", "error_at_line", "errx", "exit", "fclose", "fcloseall",
+      "fgetc", "fgetc_unlocked", "fgetwc", "fgetwc_unlocked", "fopen", "fopen64",
+      "fprintf", "fputc", "fputc_unlocked", "fputs", "fputs_unlocked", "fputwc",
+      "fputwc_unlocked", "fputws", "fputws_unlocked", "free", "freopen",
+      "freopen64", "fscanf", "fwprintf", "fwscanf", "getc", "getc_unlocked",
+      "getchar", "getchar_unlocked", "getw", "getwc", "getwc_unlocked",
+      "getwchar", "getwchar_unlocked", "grantpt", "longjmp", "mallinfo",
+      "malloc", "mallopt", "memalign", "mtrace", "muntrace", "on_exit", "perror",
+      "posix_memalign", "printf", "ptsname", "ptsname_r", "putc",
+      "putc_unlocked", "putchar", "putchar_unlocked", "puts", "putw", "putwc",
+      "putwc_unlocked", "putwchar", "putwchar_unlocked", "realloc",
+      "reallocarray", "scanf", "sem_close", "sem_open", "sem_unlink",
+      "shm_open", "shm_unlink", "siglongjmp", "sigsetjmp", "snprintf",
+      "sprintf", "sscanf", "strerror", "strerror_r", "swprintf", "swscanf",
+      "tempnam", "tmpfile", "tmpfile64", "tmpnam", "unlockpt", "valloc", "verr",
+      "verrx", "vwarn", "vwarnx", "warn", "warnx", "wprintf", "wscanf"};
    for(unsigned i=0;i<(sizeof(unsafe_fnc)/sizeof(char*));++i)
    {
       if(strcmp(unsafe_fnc[i],name)==0)
@@ -291,42 +304,9 @@ bool is_handler_wrong_fnc(const char* name)
    return false;
 }
 
-bool check_for_errno(const char *name,bool &errno_changed)
-{
-   if (!name)
-      return false;
-   static const char* change_errno_fnc[]={ 
-      "accept", "access", "aio_return", "aio_suspend", "bind", "cfsetispeed",
-      "cfsetospeed", "chdir", "chmod", "chown", "clock_gettime", "close",
-      "connect", "creat", "dup", "dup2", "execl", "execle", "execv", "execve",
-      "faccessat", "fchdir", "fchmod", "fchmodat", "fchown", "fchownat", "fcntl",
-      "fdatasync", "fexecve", "fork", "fstat", "fstatat", "fsync", "ftruncate",
-      "futimens", "getgroups", "getpeername", "getsockname", "getsockopt", "kill",
-      "link", "linkat", "listen", "lseek", "lstat", "mkdir", "mkdirat", "mkfifo",
-      "mkfifoat", "mknod", "mknodat", "open", "openat", "pause", "pipe", "poll",
-      "pselect", "read", "readlink", "readlinkat", "recv", "recvfrom", "recvmsg",
-      "rename", "renameat", "rmdir", "select", "sem_post", "send", "sendmsg",
-      "sendto", "setgid", "setpgid", "setsid", "setsockopt", "setuid", "shutdown",
-      "sigaction", "sigaddset", "sigdelset", "sigemptyset", "sigismember", "signal",
-      "sigpause", "sigpending", "sigprocmask", "sigqueue", "sigset", "sigsuspend",
-      "sockatmark", "socket", "socketpair", "stat", "symlink", "symlinkat",
-      "tcdrain", "tcflow", "tcflush", "tcgetattr", "tcgetpgrp", "tcsendbreak",
-      "tcsetattr" "tcsetpgrp", "time", "timer_getoverrun", "timer_gettime",
-      "timer_settime", "times", "uname", "unlink", "unlinkat", "utime",
-      "utimensat" "utimes", "wait", "waitpid", "write"};
-   for(unsigned i=0;i<(sizeof(change_errno_fnc)/sizeof(char*));++i)
-   {
-      if(strcmp(change_errno_fnc[i],name)==0)
-      {
-         errno_changed=true;
-         return true;
-      }
-   }
-   return false;
-}
-
 //scan user declared function in signal handler
-bool scan_own_function (const char* name, bool &not_safe, bool &fatal, bool &errno_err, std::list<const char*> &call_tree,bool *handler_found) 
+bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
+                        bool &errno_err, std::list<const char*> &call_tree,bool *handler_found) 
 {
    //check for undirect recurse and should stop infinite call of this function
    for (const char* fnc: call_tree)
@@ -397,6 +377,7 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal, bool &err
                   const char* called_function_name = get_name(fn_decl);
                   if (!called_function_name)
                      continue;
+                  uint8_t return_number = 0;
                   if (DECL_INITIAL  (fn_decl))
                   {
                      depend_data save_dependencies;
@@ -470,7 +451,7 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal, bool &err
                            }
                         }
                      }
-                     else if(!is_handler_ok_fnc(called_function_name))
+                     else if((return_number = is_handler_ok_fnc(called_function_name, obj.errno_changed)) == 0)
                      {
                         if (is_handler_wrong_fnc(called_function_name))
                         {
@@ -515,7 +496,7 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal, bool &err
                      }
                      //check if errno was not changed
                      //TODO possible extend this into handler ok fncs
-                     if (check_for_errno(called_function_name,obj.errno_changed))
+                     if (return_number == 2)
                         obj.errno_loc=gimple_location(stmt);
                      
                   }
