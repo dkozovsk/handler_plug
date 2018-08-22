@@ -10,7 +10,7 @@ static bool added_new_setter=false;
 
 static const char * const plugin_name = "handler_plug";
 
-//scan functions called in signal handlers
+//scan functions which are defined after the scan of function, which called them
 void handle_dependencies() //TODO maybe extend errno check
 {
    bool all_solved=true;
@@ -168,7 +168,7 @@ tree get_handler(gimple* stmt)
    return nullptr;
 }
 
-//look through own setters, try to find handler
+//look through own setters, try to find handler if own setter was called
 tree scan_own_handler_setter(gimple* stmt,tree fun_decl)
 {
    for (handler_setter &obj: own_setters)
@@ -211,6 +211,7 @@ tree scan_own_handler_setter(gimple* stmt,tree fun_decl)
 }
 
 //try to find signal handler in the initialization of variable
+//first indicate if the function is called for first time, second call is recursive
 tree give_me_handler(tree var,bool first)
 {
    if (TREE_CODE(var)==CONSTRUCTOR)
@@ -315,7 +316,14 @@ bool is_handler_wrong_fnc(const char* name)
    return false;
 }
 
-//scan user declared function in signal handler
+//scan user declared function for asynchronous-unsafe functions
+//name contains name of function, which should be scaned
+//not_safe returns true to this function, if the scaned function is not asynchronous-safe
+//fatal returns true to this function if the scaned function is asynchronous-unsafe
+//errno_err returns true if scaned function may change errno
+//call_tree is list of nested calls of functions, it is necesery for recurse
+//handler_found if this pointer is set, scaned function is handler and returns there, if handler was found or not
+//this function returns true, if function was scaned succesfully
 bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                         bool &errno_err, std::list<const char*> &call_tree,bool *handler_found) 
 {
@@ -718,7 +726,7 @@ inline void print_errno_warning(tree handler,location_t loc)
 int plugin_is_GPL_compatible;
 
 static struct plugin_info handler_check_gcc_plugin_info =
-{ "1.0", "This plugin scans signal handlers for asynchronous-unsafe functions" };
+{ "0.1", "This plugin scans signal handlers for violations of signal-safety rules" };
 
 namespace {
 const pass_data handler_check_pass_data =
