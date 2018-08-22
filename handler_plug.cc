@@ -11,7 +11,7 @@ static bool added_new_setter=false;
 static const char * const plugin_name = "handler_plug";
 
 //scan functions called in signal handlers
-void handle_dependencies() //TODO maybe check errno [somewhat problemathic,not impossible(extend structure ?)]
+void handle_dependencies() //TODO maybe extend errno check
 {
    bool all_solved=true;
    for (my_data &obj: fnc_list)
@@ -28,6 +28,15 @@ void handle_dependencies() //TODO maybe check errno [somewhat problemathic,not i
          bool errno_changed=false;
          if (scan_own_function(get_name(depends.fnc),not_safe,fatal,errno_changed,call_tree,nullptr))
          {
+            //primitive check, error only if errno was changed and was never stored
+            if (errno_changed && !obj.errno_changed)
+            {
+               if (obj.stored_errno.empty())
+               {
+                  obj.errno_changed=true;
+                  print_errno_warning(obj.fnc_tree,depends.loc);
+               }
+            }
             if (not_safe)
             {
                obj.not_safe=true;
@@ -391,7 +400,8 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                      // in case of recurse, do nothing
                      if (strcmp(get_name(obj.fnc_tree),called_function_name)==0)
                         ;
-                     else if (scan_own_function(called_function_name,call_not_safe,fatal_call,call_errno_changed,call_tree,nullptr))
+                     else if (scan_own_function(called_function_name,call_not_safe,fatal_call,
+                                                call_errno_changed,call_tree,nullptr))
                      {
                         if (call_errno_changed)
                         {
@@ -497,7 +507,6 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                         }
                      }
                      //check if errno was not changed
-                     //TODO possible extend this into handler ok fncs
                      if (return_number == 2)
                         obj.errno_loc=gimple_location(stmt);
                      
