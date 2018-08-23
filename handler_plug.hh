@@ -7,6 +7,7 @@
 #include "cp/cp-tree.h"
 #include "context.h"
 #include "gimple.h"
+#include "gimple-predict.h"
 #include "tree-pass.h"
 #include "tree-ssa-operands.h"
 #include "gimple-iterator.h"

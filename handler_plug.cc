@@ -29,11 +29,12 @@ void handle_dependencies() //TODO maybe extend errno check
          if (scan_own_function(get_name(depends.fnc),not_safe,fatal,errno_changed,call_tree,nullptr))
          {
             //primitive check, error only if errno was changed and was never stored
-            if (errno_changed && !obj.errno_changed)
+            if (errno_changed && !obj.errno_changed && !obj.was_err)
             {
                if (obj.stored_errno.empty())
                {
                   obj.errno_changed=true;
+                  obj.was_err =true;
                   print_errno_warning(obj.fnc_tree,depends.loc);
                }
             }
@@ -211,7 +212,7 @@ tree scan_own_handler_setter(gimple* stmt,tree fun_decl)
 }
 
 //try to find signal handler in the initialization of variable
-//first indicate if the function is called for first time, second call is recursive
+//first indicate if the function is called for the first time, second call is recursive
 tree give_me_handler(tree var,bool first)
 {
    if (TREE_CODE(var)==CONSTRUCTOR)
@@ -316,14 +317,15 @@ bool is_handler_wrong_fnc(const char* name)
    return false;
 }
 
-//scan user declared function for asynchronous-unsafe functions
-//name contains name of function, which should be scaned
-//not_safe returns true to this function, if the scaned function is not asynchronous-safe
-//fatal returns true to this function if the scaned function is asynchronous-unsafe
-//errno_err returns true if scaned function may change errno
-//call_tree is list of nested calls of functions, it is necesery for recurse
-//handler_found if this pointer is set, scaned function is handler and returns there, if handler was found or not
-//this function returns true, if function was scaned succesfully
+/* scan user declared function for asynchronous-unsafe functions
+   name contains name of function, which should be scaned
+   not_safe returns true to this function, if the scaned function is not asynchronous-safe
+   fatal returns true to this function if the scaned function is asynchronous-unsafe
+   errno_err returns true if scaned function may change errno
+   call_tree is list of nested calls of functions, it is necesery for recurse
+   handler_found if this pointer is set, scaned function is handler and returns there, if handler was found or not
+   this function returns true, if function was scaned succesfully
+*/
 bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                         bool &errno_err, std::list<const char*> &call_tree,bool *handler_found) 
 {
@@ -383,11 +385,19 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
          }
          all_ok=true;
          FOR_ALL_BB_FN(bb, obj.fun)
-         {
+         {            
             gimple_stmt_iterator gsi;
             for (gsi = gsi_start_bb (bb); !gsi_end_p (gsi); gsi_next (&gsi))
             {
                gimple * stmt = gsi_stmt (gsi);
+               /*if (handler_found != nullptr)
+               {
+                  print_gimple_stmt(stderr,stmt,0,0);
+                  std::cerr << gimple_code(stmt) << "\n";
+                  //std::cerr << GIMPLE_RETURN << "\n";
+                  //std::cerr << GIMPLE_PREDICT << "\n";
+                  
+               }*/
                if (gimple_code(stmt)==GIMPLE_CALL)
                {
                   tree fn_decl = gimple_call_fndecl(stmt);
@@ -520,6 +530,17 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                      
                   }
                }
+               else if (gimple_code(stmt)==GIMPLE_PREDICT)
+               {
+                  if (gimple_predict_predictor (stmt)==PRED_TREE_EARLY_RETURN)
+                  {
+                     if (obj.errno_changed && !obj.was_err)
+                     {
+                        obj.was_err=true;
+                        print_errno_warning(obj.fnc_tree,obj.errno_loc);
+                     }
+                  }                  
+               }
                else if (gimple_code(stmt)==GIMPLE_ASSIGN)
                {
                   //check if errno was stored or restored
@@ -613,7 +634,7 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                                        if (name)
                                           obj.stored_errno.push_front(name);
                                     }
-                                 } 
+                                 }
                               }
                            }
                            else if(TREE_CODE (r_var) == VAR_DECL)
@@ -642,8 +663,11 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                }
             }
          }
-         if (handler_found != nullptr && obj.errno_changed)
+         if (handler_found != nullptr && obj.errno_changed  && !obj.was_err)
+         {
+            obj.was_err=true;
             print_errno_warning(obj.fnc_tree,obj.errno_loc);
+         }
          if (not_safe)
          {
             call_tree.pop_back();
