@@ -17,7 +17,7 @@ int main (void)
 void handler_wrong(int signum)
 {
    kill(SIGKILL,0);
-   abort();
+   return;
    
 }
 

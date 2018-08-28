@@ -37,6 +37,31 @@ struct remember_error {
 	bool err_fatal=false;
 };
 
+struct bb_data {
+	unsigned int block_id;
+	location_t errno_loc;
+	bool errno_changed=false;
+	bool errno_stored=false;
+	bool errno_restored=false;
+	bool return_found=false;
+	bool exit_found=false;
+};
+
+struct status_data {
+	unsigned int block_id=0;
+	location_t errno_loc;
+	bool errno_changed=false;
+	bool errno_stored=false;
+	bool return_found=false;
+	bool exit_found=false;
+	std::list<unsigned int> visited;
+};
+
+struct bb_link {
+	unsigned int predecessor;
+	unsigned int successor;
+};
+
 //struct for storing all informations about scaned functions
 struct my_data {
     function* fun;
@@ -51,15 +76,19 @@ struct my_data {
     
     bool errno_changed=false;
     location_t errno_loc;
-    std::list<const char*> stored_errno;
+    std::list<tree> stored_errno;
+    
+    std::list<bb_data> block_status;
+    std::list<bb_link> block_links;
     
 };
 void handle_dependencies();
-uint8_t is_handler_ok_fnc (const char* name, bool &errno_changed);
+uint8_t is_handler_ok_fnc (const char* name);
 bool is_handler_wrong_fnc(const char* name);
 bool scan_own_function (const char* name,bool &not_safe,bool &fatal,bool &errno_err,std::list<const char*> &call_tree,bool *handler_found);
 tree give_me_handler(tree var,bool first);
 tree scan_own_handler_setter(gimple* stmt, tree fun_decl);
+void analyze_CFG(my_data &obj);
 inline void print_warning(tree handler,tree fnc,location_t loc,bool fatal);
 inline void print_errno_warning(tree handler,location_t loc);
 

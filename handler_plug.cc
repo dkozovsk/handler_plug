@@ -67,6 +67,81 @@ void handle_dependencies() //TODO maybe extend errno check
       dependencies_handled=true;
 }
 
+void analyze_CFG(my_data &obj)
+{
+   std::list<status_data> status_list;
+   {
+      status_data tmp;
+      status_list.push_back(tmp);
+   }
+   while(!status_list.empty())
+   {
+      status_data actual_status= status_list.front();
+      status_list.pop_front();
+      if(actual_status.block_id==1)
+      {
+         if(actual_status.errno_changed)
+         {
+            obj.errno_loc=actual_status.errno_loc;
+            obj.errno_changed=true;
+            return;
+         }
+      }
+      bool recurse=false;
+      for(unsigned int id : actual_status.visited)
+      {
+         if(id==actual_status.block_id)
+         {
+            recurse=true;
+            break;
+         }
+      }
+      if(recurse)
+         continue;
+      actual_status.visited.push_back(actual_status.block_id);
+      for(bb_data &status : obj.block_status)
+      {
+         if(status.block_id==actual_status.block_id)
+         {
+            if(!actual_status.errno_stored)
+               actual_status.errno_stored=status.errno_stored;
+            if(!status.errno_restored && status.errno_changed)
+            {
+               if(!actual_status.errno_changed)
+                  actual_status.errno_loc=status.errno_loc;
+               actual_status.errno_changed=true;
+            }
+            else if(status.errno_restored)
+               actual_status.errno_changed=false;
+            actual_status.return_found=status.return_found;
+            actual_status.exit_found=status.exit_found;
+            break;
+         }
+      }
+      if(actual_status.exit_found)
+         continue;
+      if(actual_status.return_found)
+      {
+         if(actual_status.errno_changed)
+         {
+            obj.errno_loc=actual_status.errno_loc;
+            obj.errno_changed=true;
+            return;
+         }
+         continue;
+      }
+      for(bb_link &link : obj.block_links)
+      {
+         if(link.predecessor==actual_status.block_id)
+         {
+            status_data tmp=actual_status;
+            tmp.block_id=link.successor;
+            status_list.push_back(tmp);
+         }
+      }
+   }
+}
+
 //returns true if fnc is already a setter
 bool is_setter(tree fnc)
 {
@@ -245,14 +320,14 @@ tree give_me_handler(tree var,bool first)
 //returns 0 when function is not asynchronous-safe, 
 //        1 if it is safe and errno is not changed,
 //        2 if it is safe, but errno may be changed
-uint8_t is_handler_ok_fnc (const char* name, bool &errno_changed)
+uint8_t is_handler_ok_fnc (const char* name)
 {
    if (!name)
       return 0;
    static const char* safe_fnc[]={
-      "abort", "aio_error", "alarm", "cfgetispeed", "cfgetospeed", "_exit",
-      "_Exit", "getegid", "geteuid", "getgid", "getpgrp", "getpid", "getppid",
-      "getuid", "posix_trace_event", "pthread_kill", "pthread_self",
+      "aio_error", "alarm", "cfgetispeed", "cfgetospeed", "getegid",
+      "geteuid", "getgid", "getpgrp", "getpid", "getppid", "getuid",
+      "posix_trace_event", "pthread_kill", "pthread_self",
       "pthread_sigmask", "raise", "sigfillset", "sleep", "umask"};
    static const char* change_errno_fnc[]={
       "accept", "access", "aio_return", "aio_suspend", "bind", "cfsetispeed", "cfsetospeed",
@@ -270,6 +345,13 @@ uint8_t is_handler_ok_fnc (const char* name, bool &errno_changed)
       "tcflow", "tcflush", "tcgetattr", "tcgetpgrp", "tcsendbreak", "tcsetattr", "tcsetpgrp", "time",
       "timer_getoverrun", "timer_gettime", "timer_settime", "times", "uname", "unlink", "unlinkat",
       "utime", "utimensat", "utimes", "wait", "waitpid", "write"};
+   static const char* safe_exit_fnc[]={
+      "abort", "_exit", "_Exit"};
+   for(unsigned i=0;i<(sizeof(safe_exit_fnc)/sizeof(char*));++i)
+   {
+      if(strcmp(safe_exit_fnc[i],name)==0)
+         return 4;
+   }
    for(unsigned i=0;i<(sizeof(safe_fnc)/sizeof(char*));++i)
    {
       if(strcmp(safe_fnc[i],name)==0)
@@ -278,10 +360,7 @@ uint8_t is_handler_ok_fnc (const char* name, bool &errno_changed)
    for(unsigned i=0;i<(sizeof(change_errno_fnc)/sizeof(char*));++i)
    {
       if(strcmp(change_errno_fnc[i],name)==0)
-      {
-         errno_changed=true;
          return 2;
-      }
    }
    return 0;
 }
@@ -385,7 +464,10 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
          }
          all_ok=true;
          FOR_ALL_BB_FN(bb, obj.fun)
-         {            
+         {
+            bb_data status;
+            status.block_id=bb->index;
+            
             gimple_stmt_iterator gsi;
             for (gsi = gsi_start_bb (bb); !gsi_end_p (gsi); gsi_next (&gsi))
             {
@@ -481,7 +563,7 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                            }
                         }
                      }
-                     else if((return_number = is_handler_ok_fnc(called_function_name, obj.errno_changed)) == 0)
+                     else if((return_number = is_handler_ok_fnc(called_function_name)) == 0)
                      {
                         if (is_handler_wrong_fnc(called_function_name))
                         {
@@ -524,24 +606,34 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                            continue;
                         }
                      }
-                     //check if errno was not changed
+                     //check if errno was not changed or exit was found
                      if (return_number == 2)
-                        obj.errno_loc=gimple_location(stmt);
+                     {
+                        if(!status.errno_changed)
+                           status.errno_loc=gimple_location(stmt);
+                        status.errno_changed=true;
+                     }
+                     else if (return_number == 4)
+                     {
+                        status.exit_found=true;
+                     }
                      
                   }
                }
-               else if (gimple_code(stmt)==GIMPLE_PREDICT)
+               else if (!obj.was_err && gimple_code(stmt)==GIMPLE_PREDICT)
                {
                   if (gimple_predict_predictor (stmt)==PRED_TREE_EARLY_RETURN)
                   {
-                     if (obj.errno_changed && !obj.was_err)
+                     status.return_found=true;
+                     /*if (obj.errno_changed && !obj.was_err)
                      {
                         obj.was_err=true;
-                        print_errno_warning(obj.fnc_tree,obj.errno_loc);
-                     }
+                        if (handler_found != nullptr)
+                           print_errno_warning(obj.fnc_tree,obj.errno_loc);
+                     }*/
                   }                  
                }
-               else if (gimple_code(stmt)==GIMPLE_ASSIGN)
+               else if (!obj.was_err && gimple_code(stmt)==GIMPLE_ASSIGN)
                {
                   //check if errno was stored or restored
                   //TODO more possible conditions, extend errno check
@@ -562,23 +654,43 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                               {
                                  if (errno_stored == SSA_NAME_VERSION (l_var))
                                  {
+                                    status.errno_restored=false;
                                     if (TREE_CODE (r_var) == VAR_DECL)
                                     {
                                        const char* name = get_name(r_var);
                                        if (name)
                                        {
                                           obj.errno_changed=true;
-                                          for(const char* errno_in_var : obj.stored_errno)
+                                          for(tree errno_in_var : obj.stored_errno)
                                           {
-                                             if(strcmp(name,errno_in_var)==0)
+                                             if(EXPR_LINENO (r_var)!=EXPR_LINENO (errno_in_var))
+                                                continue;
+                                             const char* errno_name=get_name(errno_in_var);
+                                             if(!errno_name)
+                                                break;
+                                             if(strcmp(name,errno_name)==0)
                                              {
+                                                status.errno_restored=true;
                                                 obj.errno_changed=false;
+                                             }
+                                          }
+                                          if (!status.errno_restored)
+                                          {
+                                             if (!status.errno_changed)
+                                             {
+                                                status.errno_loc=gimple_location(stmt);
+                                                status.errno_changed=true;
                                              }
                                           }
                                        }
                                     }
                                     else
                                     {
+                                       if (!status.errno_changed)
+                                       {
+                                          status.errno_loc=gimple_location(stmt);
+                                          status.errno_changed=true;
+                                       }
                                        obj.errno_changed=true;
                                     }
                                  } 
@@ -591,23 +703,43 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                               {
                                  if (strcmp(name,errno_ref)==0)
                                  {
+                                    status.errno_restored=false;
                                     if (TREE_CODE (r_var) == VAR_DECL)
                                     {
                                        name = get_name(r_var);
                                        if (name)
                                        {
                                           obj.errno_changed=true;
-                                          for(const char* errno_in_var : obj.stored_errno)
+                                          for(tree errno_in_var : obj.stored_errno)
                                           {
-                                             if(strcmp(name,errno_in_var)==0)
+                                             if(EXPR_LINENO (r_var)!=EXPR_LINENO (errno_in_var))
+                                                continue;
+                                             const char* errno_name=get_name(errno_in_var);
+                                             if(!errno_name)
+                                                break;
+                                             if(strcmp(name,errno_name)==0)
                                              {
+                                                status.errno_restored=true;
                                                 obj.errno_changed=false;
+                                             }
+                                          }
+                                          if (!status.errno_restored)
+                                          {
+                                             if (!status.errno_changed)
+                                             {
+                                                status.errno_loc=gimple_location(stmt);
+                                                status.errno_changed=true;
                                              }
                                           }
                                        }
                                     }
                                     else
                                     {
+                                       if (!status.errno_changed)
+                                       {
+                                          status.errno_loc=gimple_location(stmt);
+                                          status.errno_changed=true;
+                                       }
                                        obj.errno_changed=true;
                                     }
                                     break;
@@ -630,9 +762,14 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                                  {
                                     if (TREE_CODE (l_var) == VAR_DECL)
                                     {
-                                       const char* name = get_name(l_var);
+                                       status.errno_stored=true;
+                                       obj.stored_errno.push_front(l_var);
+                                       /*const char* name = get_name(l_var);
                                        if (name)
+                                       {
+                                          status.errno_stored=true;
                                           obj.stored_errno.push_front(name);
+                                       }*/
                                     }
                                  }
                               }
@@ -648,9 +785,14 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                                     {
                                        if (TREE_CODE (l_var) == VAR_DECL)
                                        {
-                                          name = get_name(l_var);
+                                          status.errno_stored=true;
+                                          obj.stored_errno.push_front(l_var);
+                                          /*name = get_name(l_var);
                                           if (name)
+                                          {
+                                             status.errno_stored=true;
                                              obj.stored_errno.push_front(name);
+                                          }*/
                                        }
                                     }
                                     break;
@@ -662,11 +804,33 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                   }
                }
             }
+            if (!obj.was_err)
+            {
+               obj.block_status.push_back(status);
+               //TODO store info about control flow, more structures needed, errno info about block, not functions
+               //TODO analyze control flow graph using stored informations about blocks, print error if there is way that may change errno
+               edge e;
+               edge_iterator ei;
+          
+               FOR_EACH_EDGE(e, ei, bb->succs)
+               {
+                 basic_block succ = e->dest;
+                 bb_link link;
+                 link.predecessor=bb->index;
+                 link.successor=succ->index;
+                 obj.block_links.push_back(link);
+               }
+            }
          }
-         if (handler_found != nullptr && obj.errno_changed  && !obj.was_err)
+         //TODO analyze control flow
+         if (!obj.was_err)
          {
-            obj.was_err=true;
-            print_errno_warning(obj.fnc_tree,obj.errno_loc);
+            analyze_CFG(obj);
+            if (handler_found != nullptr && obj.errno_changed)
+            {
+               obj.was_err=true;
+               print_errno_warning(obj.fnc_tree,obj.errno_loc);
+            }
          }
          if (not_safe)
          {
