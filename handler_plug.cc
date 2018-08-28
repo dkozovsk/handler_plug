@@ -505,8 +505,9 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                      {
                         if (call_errno_changed)
                         {
-                           obj.errno_changed=true;
-                           obj.errno_loc=gimple_location(stmt);
+                           if(!status.errno_changed)
+                              status.errno_loc=gimple_location(stmt);
+                           status.errno_changed=true;
                         }
                         if (call_not_safe)
                         {
@@ -536,8 +537,9 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                      {
                         if (call_errno_changed)
                         {
-                           obj.errno_changed=true;
-                           obj.errno_loc=gimple_location(stmt);
+                           if(!status.errno_changed)
+                              status.errno_loc=gimple_location(stmt);
+                           status.errno_changed=true;
                         }
                         all_ok=false;
                         dependencies_handled=false;
@@ -660,7 +662,6 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                                        const char* name = get_name(r_var);
                                        if (name)
                                        {
-                                          obj.errno_changed=true;
                                           for(tree errno_in_var : obj.stored_errno)
                                           {
                                              if(EXPR_LINENO (r_var)!=EXPR_LINENO (errno_in_var))
@@ -671,7 +672,6 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                                              if(strcmp(name,errno_name)==0)
                                              {
                                                 status.errno_restored=true;
-                                                obj.errno_changed=false;
                                              }
                                           }
                                           if (!status.errno_restored)
@@ -691,7 +691,7 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                                           status.errno_loc=gimple_location(stmt);
                                           status.errno_changed=true;
                                        }
-                                       obj.errno_changed=true;
+                                       
                                     }
                                  } 
                               }
@@ -709,7 +709,6 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                                        name = get_name(r_var);
                                        if (name)
                                        {
-                                          obj.errno_changed=true;
                                           for(tree errno_in_var : obj.stored_errno)
                                           {
                                              if(EXPR_LINENO (r_var)!=EXPR_LINENO (errno_in_var))
@@ -720,7 +719,6 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                                              if(strcmp(name,errno_name)==0)
                                              {
                                                 status.errno_restored=true;
-                                                obj.errno_changed=false;
                                              }
                                           }
                                           if (!status.errno_restored)
@@ -740,7 +738,6 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                                           status.errno_loc=gimple_location(stmt);
                                           status.errno_changed=true;
                                        }
-                                       obj.errno_changed=true;
                                     }
                                     break;
                                  }
@@ -756,7 +753,7 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                         {
                            if(TREE_CODE (r_var) == SSA_NAME)
                            {
-                              if (errno_valid && !obj.errno_changed)
+                              if (errno_valid && !status.errno_changed)
                               {
                                  if (errno_stored == SSA_NAME_VERSION (r_var))
                                  {
@@ -781,7 +778,7 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                               {
                                  if (strcmp(name,errno_ref)==0)
                                  {
-                                    if(!obj.errno_changed)
+                                    if(!status.errno_changed)
                                     {
                                        if (TREE_CODE (l_var) == VAR_DECL)
                                        {
