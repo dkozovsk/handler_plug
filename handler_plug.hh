@@ -43,8 +43,10 @@ struct bb_data {
 	bool errno_changed=false;
 	bool errno_stored=false;
 	bool errno_restored=false;
+	tree restore_tree=nullptr;
 	bool return_found=false;
 	bool exit_found=false;
+	std::list<tree> errno_list;
 };
 
 struct status_data {
@@ -55,6 +57,7 @@ struct status_data {
 	bool return_found=false;
 	bool exit_found=false;
 	std::list<unsigned int> visited;
+	std::list<tree> errno_list;
 };
 
 struct bb_link {

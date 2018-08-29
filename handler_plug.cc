@@ -71,8 +71,8 @@ void analyze_CFG(my_data &obj)
 {
    std::list<status_data> status_list;
    {
-      status_data tmp;
-      status_list.push_back(tmp);
+      status_data init;
+      status_list.push_back(init);
    }
    while(!status_list.empty())
    {
@@ -86,6 +86,7 @@ void analyze_CFG(my_data &obj)
             obj.errno_changed=true;
             return;
          }
+         continue;
       }
       bool recurse=false;
       for(unsigned int id : actual_status.visited)
@@ -103,16 +104,40 @@ void analyze_CFG(my_data &obj)
       {
          if(status.block_id==actual_status.block_id)
          {
-            if(!actual_status.errno_stored)
-               actual_status.errno_stored=status.errno_stored;
-            if(!status.errno_restored && status.errno_changed)
+            if(!actual_status.errno_changed)
+            {
+               if(!actual_status.errno_stored && status.errno_stored)
+               {
+                  actual_status.errno_stored=true;
+                  actual_status.errno_list=status.errno_list;
+               }
+               else if(status.errno_stored)
+               {
+                  for(tree errno_var : status.errno_list)
+                     actual_status.errno_list.push_back(errno_var);
+               }
+            }
+            if(status.errno_changed)
             {
                if(!actual_status.errno_changed)
                   actual_status.errno_loc=status.errno_loc;
                actual_status.errno_changed=true;
             }
-            else if(status.errno_restored)
-               actual_status.errno_changed=false;
+            if(status.errno_restored && actual_status.errno_stored)
+            {
+               for(tree errno_var : actual_status.errno_list)
+               {
+                  if(EXPR_LINENO (errno_var)==EXPR_LINENO (errno_var))
+                  {
+                     const char* errno_name=get_name(errno_var);
+                     const char* restore_name=get_name(status.restore_tree);
+                     if(!errno_name || !restore_name)
+                        continue;
+                     if(strcmp(restore_name,errno_name)==0)
+                        actual_status.errno_changed=false;
+                  }
+               }
+            }
             actual_status.return_found=status.return_found;
             actual_status.exit_found=status.exit_found;
             break;
@@ -674,6 +699,7 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                                              if(strcmp(name,errno_name)==0)
                                              {
                                                 status.errno_restored=true;
+                                                status.restore_tree=r_var;
                                              }
                                           }
                                           if (!status.errno_restored)
@@ -721,6 +747,7 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                                              if(strcmp(name,errno_name)==0)
                                              {
                                                 status.errno_restored=true;
+                                                status.restore_tree=r_var;
                                              }
                                           }
                                           if (!status.errno_restored)
@@ -763,6 +790,7 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                                     {
                                        status.errno_stored=true;
                                        obj.stored_errno.push_front(l_var);
+                                       status.errno_list.push_back(l_var);
                                        /*const char* name = get_name(l_var);
                                        if (name)
                                        {
@@ -786,6 +814,7 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                                        {
                                           status.errno_stored=true;
                                           obj.stored_errno.push_front(l_var);
+                                          status.errno_list.push_back(l_var);
                                           /*name = get_name(l_var);
                                           if (name)
                                           {
