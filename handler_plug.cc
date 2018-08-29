@@ -540,6 +540,7 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                            if(!status.errno_changed)
                               status.errno_loc=gimple_location(stmt);
                            status.errno_changed=true;
+                           status.errno_restored=false;
                         }
                         all_ok=false;
                         dependencies_handled=false;
@@ -614,6 +615,7 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                         if(!status.errno_changed)
                            status.errno_loc=gimple_location(stmt);
                         status.errno_changed=true;
+                        status.errno_restored=false;
                      }
                      else if (return_number == 4)
                      {
