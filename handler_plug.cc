@@ -344,7 +344,8 @@ tree give_me_handler(tree var,bool first)
 //scan if the called function in signal handler is asynchronous-safe and if errno may be changed
 //returns 0 when function is not asynchronous-safe, 
 //        1 if it is safe and errno is not changed,
-//        2 if it is safe, but errno may be changed
+//        2 if it is safe, but errno may be changed,
+//        4 if it is safe exit function
 uint8_t is_handler_ok_fnc (const char* name)
 {
    if (!name)
@@ -533,6 +534,7 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                            if(!status.errno_changed)
                               status.errno_loc=gimple_location(stmt);
                            status.errno_changed=true;
+                           status.errno_restored=false;
                         }
                         if (call_not_safe)
                         {
