@@ -127,7 +127,7 @@ void analyze_CFG(my_data &obj)
             {
                for(tree errno_var : actual_status.errno_list)
                {
-                  if(DECL_SOURCE_LINE (errno_var)==DECL_SOURCE_LINE (status.restore_tree))
+                  if(DECL_UID (errno_var)==DECL_UID (status.restore_tree))
                   {
                      const char* errno_name=get_name(errno_var);
                      const char* restore_name=get_name(status.restore_tree);
@@ -693,7 +693,7 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                                        {
                                           for(tree errno_in_var : obj.stored_errno)
                                           {
-                                             if(DECL_SOURCE_LINE (r_var)!=DECL_SOURCE_LINE (errno_in_var))
+                                             if(DECL_UID (r_var)!=DECL_UID (errno_in_var))
                                                 continue;
                                              const char* errno_name=get_name(errno_in_var);
                                              if(!errno_name)
@@ -741,7 +741,7 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                                        {
                                           for(tree errno_in_var : obj.stored_errno)
                                           {
-                                             if(DECL_SOURCE_LINE (r_var)!=DECL_SOURCE_LINE (errno_in_var))
+                                             if(DECL_UID (r_var)!=DECL_UID (errno_in_var))
                                                 continue;
                                              const char* errno_name=get_name(errno_in_var);
                                              if(!errno_name)
