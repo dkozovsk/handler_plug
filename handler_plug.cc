@@ -346,7 +346,7 @@ tree give_me_handler(tree var,bool first)
 //        1 if it is safe and errno is not changed,
 //        2 if it is safe, but errno may be changed,
 //        4 if it is safe exit function
-uint8_t is_handler_ok_fnc (const char* name)
+int8_t is_handler_ok_fnc (const char* name)
 {
    if (!name)
       return 0;
@@ -388,7 +388,7 @@ uint8_t is_handler_ok_fnc (const char* name)
       if(strcmp(change_errno_fnc[i],name)==0)
          return 2;
    }
-   return 0;
+   return is_handler_wrong_fnc(name) ? -1 : 0;
 }
 
 //scan if the called function in signal handler is asynchronous-unsafe
@@ -498,14 +498,6 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
             for (gsi = gsi_start_bb (bb); !gsi_end_p (gsi); gsi_next (&gsi))
             {
                gimple * stmt = gsi_stmt (gsi);
-               /*if (handler_found != nullptr)
-               {
-                  print_gimple_stmt(stderr,stmt,0,0);
-                  std::cerr << gimple_code(stmt) << "\n";
-                  //std::cerr << GIMPLE_RETURN << "\n";
-                  //std::cerr << GIMPLE_PREDICT << "\n";
-                  
-               }*/
                if (gimple_code(stmt)==GIMPLE_CALL)
                {
                   tree fn_decl = gimple_call_fndecl(stmt);
@@ -514,7 +506,7 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                   const char* called_function_name = get_name(fn_decl);
                   if (!called_function_name)
                      continue;
-                  uint8_t return_number = 0;
+                  int8_t return_number = 0;
                   if (DECL_INITIAL  (fn_decl))
                   {
                      depend_data save_dependencies;
@@ -541,7 +533,7 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                            all_ok=false;
                            obj.not_safe=true;
                            
-                           if (handler_found != nullptr)
+                           if (obj.is_handler)
                               print_warning(obj.fnc_tree,fn_decl,gimple_location(stmt),fatal_call);
                            else
                            {
@@ -552,11 +544,8 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                               obj.err_log.push_back(new_err);
                            }
                         
-                           not_safe=true;
                            if (!obj.fatal)
                               obj.fatal=fatal_call;
-                           if (!fatal)
-                              fatal=fatal_call;
                            continue;
                         }
                      }
@@ -593,48 +582,26 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                            }
                         }
                      }
-                     else if((return_number = is_handler_ok_fnc(called_function_name)) == 0)
+                     else if((return_number = is_handler_ok_fnc(called_function_name)) <= 0)
                      {
-                        if (is_handler_wrong_fnc(called_function_name))
-                        {
-                           all_ok=false;
-                           
-                           if (handler_found != nullptr)
-                              print_warning(obj.fnc_tree,fn_decl,gimple_location(stmt),true);
-                           else
-                           {
-                              remember_error new_err;
-                              new_err.err_loc = gimple_location(stmt);
-                              new_err.err_fnc = fn_decl;
-                              new_err.err_fatal = true;
-                              obj.err_log.push_back(new_err);
-                           }
-                           
-                           obj.not_safe=true;
-                           not_safe=true;
-                           obj.fatal=true;
-                           fatal=true;
-                           continue;
-                        }
+                        all_ok=false;
+                        obj.not_safe=true;
+                        
+                        if (obj.is_handler)
+                           print_warning(obj.fnc_tree,fn_decl,gimple_location(stmt),return_number==-1);
                         else
                         {
-                           all_ok=false;
-                           
-                           if (handler_found != nullptr)
-                              print_warning(obj.fnc_tree,fn_decl,gimple_location(stmt),false);
-                           else
-                           {
-                              remember_error new_err;
-                              new_err.err_loc = gimple_location(stmt);
-                              new_err.err_fnc = fn_decl;
-                              new_err.err_fatal = false;
-                              obj.err_log.push_back(new_err);
-                           }
-                           
-                           obj.not_safe=true;
-                           not_safe=true;
-                           continue;
+                           remember_error new_err;
+                           new_err.err_loc = gimple_location(stmt);
+                           new_err.err_fnc = fn_decl;
+                           new_err.err_fatal = return_number==-1;
+                           obj.err_log.push_back(new_err);
                         }
+                        
+                        if (return_number == -1)
+                           obj.fatal=true;
+                        
+                        continue;
                      }
                      //check if errno was not changed or exit was found
                      if (return_number == 2)
@@ -656,12 +623,6 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                   if (gimple_predict_predictor (stmt)==PRED_TREE_EARLY_RETURN)
                   {
                      status.return_found=true;
-                     /*if (obj.errno_changed && !obj.was_err)
-                     {
-                        obj.was_err=true;
-                        if (handler_found != nullptr)
-                           print_errno_warning(obj.fnc_tree,obj.errno_loc);
-                     }*/
                   }                  
                }
                else if (!obj.was_err && gimple_code(stmt)==GIMPLE_ASSIGN)
@@ -793,12 +754,6 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                                        status.errno_stored=true;
                                        obj.stored_errno.push_front(l_var);
                                        status.errno_list.push_back(l_var);
-                                       /*const char* name = get_name(l_var);
-                                       if (name)
-                                       {
-                                          status.errno_stored=true;
-                                          obj.stored_errno.push_front(name);
-                                       }*/
                                     }
                                  }
                               }
@@ -817,12 +772,6 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                                           status.errno_stored=true;
                                           obj.stored_errno.push_front(l_var);
                                           status.errno_list.push_back(l_var);
-                                          /*name = get_name(l_var);
-                                          if (name)
-                                          {
-                                             status.errno_stored=true;
-                                             obj.stored_errno.push_front(name);
-                                          }*/
                                        }
                                     }
                                     break;
@@ -852,11 +801,13 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                }
             }
          }
+         not_safe=obj.not_safe;
+         fatal=obj.fatal;
          //TODO analyze control flow
          if (!obj.was_err)
          {
             analyze_CFG(obj);
-            if (handler_found != nullptr && obj.errno_changed)
+            if (obj.is_handler && obj.errno_changed)
             {
                obj.was_err=true;
                print_errno_warning(obj.fnc_tree,obj.errno_loc);
