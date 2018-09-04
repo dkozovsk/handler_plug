@@ -88,6 +88,10 @@ struct my_data {
 void handle_dependencies();
 int8_t is_handler_ok_fnc (const char* name);
 bool is_handler_wrong_fnc(const char* name);
+void process_gimple_call(my_data &obj,bb_data &status,gimple * stmt, bool &all_ok, std::list<const char*> &call_tree,
+                           bool &errno_valid, unsigned int &errno_stored, std::list<const char*> &errno_ptr);
+void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &errno_valid,
+                           unsigned int &errno_stored, std::list<const char*> &errno_ptr);
 bool scan_own_function (const char* name,bool &not_safe,bool &fatal,bool &errno_err,std::list<const char*> &call_tree,bool *handler_found);
 tree give_me_handler(tree var,bool first);
 tree scan_own_handler_setter(gimple* stmt, tree fun_decl);
