@@ -68,6 +68,23 @@ void handle_dependencies() //TODO maybe extend errno check
       dependencies_handled=true;
 }
 
+bool is_var_in_list(tree var, std::list<tree> &list)
+{
+   for(tree list_var : list)
+   {
+      if(DECL_UID (list_var)==DECL_UID (var))
+      {
+         const char* list_var_name=get_name(list_var);
+         const char* var_name=get_name(var);
+         if(!list_var_name || !var_name)
+            continue;
+         if(strcmp(list_var_name,var_name)==0)
+            return true;
+      }
+   }
+   return false;
+}
+
 void analyze_CFG(my_data &obj)
 {
    std::list<status_data> status_list;
@@ -126,18 +143,8 @@ void analyze_CFG(my_data &obj)
             }
             if(status.errno_restored && actual_status.errno_stored)
             {
-               for(tree errno_var : actual_status.errno_list)
-               {
-                  if(DECL_UID (errno_var)==DECL_UID (status.restore_tree))
-                  {
-                     const char* errno_name=get_name(errno_var);
-                     const char* restore_name=get_name(status.restore_tree);
-                     if(!errno_name || !restore_name)
-                        continue;
-                     if(strcmp(restore_name,errno_name)==0)
-                        actual_status.errno_changed=false;
-                  }
-               }
+               if(is_var_in_list(status.restore_tree,actual_status.errno_list))
+                  actual_status.errno_changed=false;
             }
             actual_status.return_found=status.return_found;
             actual_status.exit_found=status.exit_found;
@@ -568,24 +575,12 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
             status.errno_restored=false;
             if (TREE_CODE (r_var) == VAR_DECL)
             {
-               const char* name = get_name(r_var);
-               if (name)
+               if(is_var_in_list(r_var,obj.stored_errno))
                {
-                  for(tree errno_in_var : obj.stored_errno)
-                  {
-                     if(DECL_UID (r_var)!=DECL_UID (errno_in_var))
-                        continue;
-                     const char* errno_name=get_name(errno_in_var);
-                     if(!errno_name)
-                        break;
-                     if(strcmp(name,errno_name)==0)
-                     {
-                        status.errno_restored=true;
-                        status.restore_tree=r_var;
-                     }
-                  }
+                  status.errno_restored=true;
+                  status.restore_tree=r_var;
                }
-               if (!status.errno_restored)
+               else
                {
                   if (!status.errno_changed)
                      status.errno_loc=gimple_location(stmt);
@@ -612,24 +607,12 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
                status.errno_restored=false;
                if (TREE_CODE (r_var) == VAR_DECL)
                {
-                  name = get_name(r_var);
-                  if (name)
+                  if(is_var_in_list(r_var,obj.stored_errno))
                   {
-                     for(tree errno_in_var : obj.stored_errno)
-                     {
-                        if(DECL_UID (r_var)!=DECL_UID (errno_in_var))
-                           continue;
-                        const char* errno_name=get_name(errno_in_var);
-                        if(!errno_name)
-                           break;
-                        if(strcmp(name,errno_name)==0)
-                        {
-                           status.errno_restored=true;
-                           status.restore_tree=r_var;
-                        }
-                     }
+                     status.errno_restored=true;
+                     status.restore_tree=r_var;
                   }
-                  if (!status.errno_restored)
+                  else
                   {
                      if (!status.errno_changed)
                         status.errno_loc=gimple_location(stmt);
