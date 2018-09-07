@@ -68,6 +68,39 @@ void handle_dependencies() //TODO maybe extend errno check
       dependencies_handled=true;
 }
 
+void unique_in_lists(tree var, std::list<tree> &list_add, std::list<tree> &list_remove)
+{
+   add_unique_to_list(var,list_add);
+   remove_from_list(var,list_remove);
+}
+
+void remove_from_list(tree var, std::list<tree> &list)
+{
+   std::list<tree>::iterator it;
+   for(it = list.begin(); it != list.end(); ++it)
+   {
+      tree list_var = *it;
+      if(DECL_UID (list_var)==DECL_UID (var))
+      {
+         const char* list_var_name=get_name(list_var);
+         const char* var_name=get_name(var);
+         if(!list_var_name || !var_name)
+            continue;
+         if(strcmp(list_var_name,var_name)==0)
+         {
+            list.erase(it);
+            return;
+         }
+      }
+   }
+}
+
+void add_unique_to_list(tree var, std::list<tree> &list)
+{
+   if (!is_var_in_list(var,list))
+      list.push_back(var);
+}
+
 bool is_var_in_list(tree var, std::list<tree> &list)
 {
    for(tree list_var : list)
@@ -122,17 +155,21 @@ void analyze_CFG(my_data &obj)
       {
          if(status.block_id==actual_status.block_id)
          {
-            if(!actual_status.errno_changed)
+            for(tree destroyed_errno : status.destroyed_list)
+               remove_from_list(destroyed_errno, actual_status.errno_list);
+            if(actual_status.errno_list.empty())
+               actual_status.errno_stored=false;
+            if(!actual_status.errno_changed && status.errno_stored)
             {
-               if(!actual_status.errno_stored && status.errno_stored)
+               if(!actual_status.errno_stored)
                {
                   actual_status.errno_stored=true;
                   actual_status.errno_list=status.errno_list;
                }
-               else if(status.errno_stored)
+               else
                {
                   for(tree errno_var : status.errno_list)
-                     actual_status.errno_list.push_back(errno_var);
+                     add_unique_to_list(errno_var, actual_status.errno_list);
                }
             }
             if(status.errno_changed)
@@ -557,11 +594,19 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
 {
    //check if errno was stored or restored
    //TODO more possible conditions, extend errno check
+   /*
+    * TODO(important) destroy stored errno !!! 
+    * (another list for CFG analysis, destroyed, stored, only in one of these list always)
+   */
    tree r_var = gimple_assign_rhs1 (stmt);
    tree l_var = gimple_assign_lhs (stmt);
    if (!r_var || !l_var)
       return;
-   //TODO maybe stored to another place from already stored errno(rare)
+   //TODO(not important) maybe stored to another place from already stored errno(rare)
+   if (TREE_CODE (l_var) == VAR_DECL && is_var_in_list(l_var,obj.stored_errno))
+   {
+      unique_in_lists(l_var, status.destroyed_list, status.errno_list);
+   }
    if (TREE_CODE (l_var) == MEM_REF)
    {
       //get ID of mem_ref SSA_NAME variable(build in variable)
@@ -645,8 +690,8 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
                if (TREE_CODE (l_var) == VAR_DECL)
                {
                   status.errno_stored=true;
-                  obj.stored_errno.push_front(l_var);
-                  status.errno_list.push_back(l_var);
+                  add_unique_to_list(l_var, obj.stored_errno);
+                  unique_in_lists(l_var, status.errno_list, status.destroyed_list);
                }
             }
          }
@@ -663,8 +708,8 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
                   if (TREE_CODE (l_var) == VAR_DECL)
                   {
                      status.errno_stored=true;
-                     obj.stored_errno.push_front(l_var);
-                     status.errno_list.push_back(l_var);
+                     add_unique_to_list(l_var, obj.stored_errno);
+                     unique_in_lists(l_var, status.errno_list, status.destroyed_list);
                   }
                }
                break;

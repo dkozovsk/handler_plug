@@ -47,6 +47,7 @@ struct bb_data {
 	bool return_found=false;
 	bool exit_found=false;
 	std::list<tree> errno_list;
+	std::list<tree> destroyed_list;
 };
 
 struct status_data {
@@ -88,7 +89,6 @@ struct my_data {
 void handle_dependencies();
 int8_t is_handler_ok_fnc (const char* name);
 bool is_handler_wrong_fnc(const char* name);
-bool is_var_in_list(tree var, std::list<tree> &list);
 void process_gimple_call(my_data &obj,bb_data &status,gimple * stmt, bool &all_ok, std::list<const char*> &call_tree,
                            bool &errno_valid, unsigned int &errno_stored, std::list<const char*> &errno_ptr);
 void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &errno_valid,
@@ -99,4 +99,10 @@ tree scan_own_handler_setter(gimple* stmt, tree fun_decl);
 void analyze_CFG(my_data &obj);
 inline void print_warning(tree handler,tree fnc,location_t loc,bool fatal);
 inline void print_errno_warning(tree handler,location_t loc);
+//errno list operations
+bool is_var_in_list(tree var, std::list<tree> &list);
+void unique_in_lists(tree var, std::list<tree> &list_add, std::list<tree> &list_remove);
+void remove_from_list(tree var, std::list<tree> &list);
+void add_unique_to_list(tree var, std::list<tree> &list);
+
 
