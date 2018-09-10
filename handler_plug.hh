@@ -1,5 +1,6 @@
 #include <iostream>
 #include <list>
+#include <set>
 
 #include "gcc-plugin.h"
 #include "plugin-version.h"
@@ -37,17 +38,32 @@ struct remember_error {
 	bool err_fatal=false;
 };
 
+struct errno_var {
+	unsigned int id;
+	const char *name;
+};
+
+enum instruction_code {
+	IC_CHANGE_ERRNO,
+	IC_SAVE_ERRNO,
+	IC_DESTROY_STORAGE,
+	IC_RESTORE_ERRNO,
+	IC_RETURN,
+	IC_EXIT
+};
+
+struct instruction {
+	instruction_code ic;
+	tree var;
+	location_t instr_loc;
+};
+
 struct bb_data {
 	unsigned int block_id;
-	location_t errno_loc;
-	bool errno_changed=false;
-	bool errno_stored=false;
-	bool errno_restored=false;
-	tree restore_tree=nullptr;
-	bool return_found=false;
-	bool exit_found=false;
-	std::list<tree> errno_list;
-	std::list<tree> destroyed_list;
+	bool computed=false;
+	std::list<instruction> instr_list;
+	std::set<errno_var> input_set;
+	std::set<errno_var> output_set;
 };
 
 struct status_data {
@@ -96,13 +112,20 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
 bool scan_own_function (const char* name,bool &not_safe,bool &fatal,bool &errno_err,std::list<const char*> &call_tree,bool *handler_found);
 tree give_me_handler(tree var,bool first);
 tree scan_own_handler_setter(gimple* stmt, tree fun_decl);
+//CFG analisys
 void analyze_CFG(my_data &obj);
+bool compute_bb(bb_data &status, location_t &err_loc,bool &changed);
+void intersection(std::set<errno_var> &destination,std::set<errno_var> &source);
+bool equal_sets(std::set<errno_var> &a,std::set<errno_var> &b);
+errno_var tree_to_errno_var(tree var);
+//warnings
 inline void print_warning(tree handler,tree fnc,location_t loc,bool fatal);
 inline void print_errno_warning(tree handler,location_t loc);
 //errno list operations
 bool is_var_in_list(tree var, std::list<tree> &list);
-void unique_in_lists(tree var, std::list<tree> &list_add, std::list<tree> &list_remove);
-void remove_from_list(tree var, std::list<tree> &list);
 void add_unique_to_list(tree var, std::list<tree> &list);
+//bool operators for errno_var
+bool operator<(const errno_var &a, const errno_var &b);
+bool operator==(const errno_var &a, const errno_var &b);
 
 

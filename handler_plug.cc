@@ -10,6 +10,30 @@ static bool added_new_setter=false;
 
 static const char * const plugin_name = "handler_plug";
 
+static const errno_var pseudo_errno={ 
+   .id=0, 
+   .name=nullptr
+};
+
+bool operator< (const errno_var &a, const errno_var &b)
+{
+   if (!a.name)
+      return b.name != nullptr;
+   else if(!b.name)
+      return false;
+   if (a.id==b.id)
+      return strcmp(a.name,b.name) < 0;
+   return a.id < b.id;
+}
+bool operator== (const errno_var &a, const errno_var &b)
+{
+   if (!a.name || !b.name)
+      return b.name == a.name;
+   if (a.id==b.id)
+      return strcmp(a.name,b.name) == 0;
+   return false;
+}
+
 //scan functions which are defined after the scan of function, which called them
 void handle_dependencies() //TODO maybe extend errno check
 {
@@ -68,33 +92,6 @@ void handle_dependencies() //TODO maybe extend errno check
       dependencies_handled=true;
 }
 
-void unique_in_lists(tree var, std::list<tree> &list_add, std::list<tree> &list_remove)
-{
-   add_unique_to_list(var,list_add);
-   remove_from_list(var,list_remove);
-}
-
-void remove_from_list(tree var, std::list<tree> &list)
-{
-   std::list<tree>::iterator it;
-   for(it = list.begin(); it != list.end(); ++it)
-   {
-      tree list_var = *it;
-      if(DECL_UID (list_var)==DECL_UID (var))
-      {
-         const char* list_var_name=get_name(list_var);
-         const char* var_name=get_name(var);
-         if(!list_var_name || !var_name)
-            continue;
-         if(strcmp(list_var_name,var_name)==0)
-         {
-            list.erase(it);
-            return;
-         }
-      }
-   }
-}
-
 void add_unique_to_list(tree var, std::list<tree> &list)
 {
    if (!is_var_in_list(var,list))
@@ -118,98 +115,180 @@ bool is_var_in_list(tree var, std::list<tree> &list)
    return false;
 }
 
-void analyze_CFG(my_data &obj)
+void intersection(std::set<errno_var> &destination,std::set<errno_var> &source)
 {
-   std::list<status_data> status_list;
+   std::set<errno_var>::iterator it=destination.begin();
+   while(it!=destination.end())
    {
-      status_data init;
-      status_list.push_back(init);
+      std::set<errno_var>::iterator actual=it;
+      ++it;
+      if(source.find(*actual)==source.end())
+      {
+         destination.erase(actual);
+      }
    }
-   while(!status_list.empty())
+}
+bool equal_sets(std::set<errno_var> &a,std::set<errno_var> &b)
+{
+   std::set<errno_var>::iterator it_a=a.begin();
+   std::set<errno_var>::iterator it_b=b.begin();
+   while(it_a != a.end() && it_b != b.end())
    {
-      status_data actual_status= status_list.front();
-      status_list.pop_front();
-      if(actual_status.block_id==1)
+      if(!(*it_a == *it_b))
+         break;
+      ++it_a;
+      ++it_b;
+   }
+   if(it_a != a.end() || it_b != b.end())
+      return false;
+   return true;
+}
+
+errno_var tree_to_errno_var(tree var)
+{
+   errno_var new_var;
+   new_var.id=DECL_UID (var);
+   new_var.name=get_name(var);
+   if (!new_var.name)
+      return pseudo_errno;
+   return new_var;
+}
+
+bool compute_bb(bb_data &status, location_t &err_loc,bool &changed)
+{
+   status.computed=true;
+   std::set<errno_var> new_set=status.input_set;
+   for (instruction &instr : status.instr_list)
+   {
+      switch (instr.ic)
       {
-         if(actual_status.errno_changed)
-         {
-            obj.errno_loc=actual_status.errno_loc;
-            obj.errno_changed=true;
-            return;
-         }
-         continue;
-      }
-      bool recurse=false;
-      for(unsigned int id : actual_status.visited)
-      {
-         if(id==actual_status.block_id)
-         {
-            recurse=true;
-            break;
-         }
-      }
-      if(recurse)
-         continue;
-      actual_status.visited.push_back(actual_status.block_id);
-      for(bb_data &status : obj.block_status)
-      {
-         if(status.block_id==actual_status.block_id)
-         {
-            for(tree destroyed_errno : status.destroyed_list)
-               remove_from_list(destroyed_errno, actual_status.errno_list);
-            if(actual_status.errno_list.empty())
-               actual_status.errno_stored=false;
-            if(!actual_status.errno_changed && status.errno_stored)
+         case IC_CHANGE_ERRNO:
             {
-               if(!actual_status.errno_stored)
+               std::set<errno_var>::iterator it;
+               it = new_set.find(pseudo_errno);
+               if (it!=new_set.end())
                {
-                  actual_status.errno_stored=true;
-                  actual_status.errno_list=status.errno_list;
+                  err_loc=instr.instr_loc;
+                  new_set.erase(it);
+               }
+            }
+            break;
+         case IC_SAVE_ERRNO:
+            {
+               std::set<errno_var>::iterator it;
+               it = new_set.find(pseudo_errno);
+               if (it!=new_set.end())
+               {
+                  errno_var new_var=tree_to_errno_var(instr.var);
+                  new_set.insert(new_var);
+               }
+            }
+            break;
+         case IC_DESTROY_STORAGE:
+            {
+               std::set<errno_var>::iterator it;
+               it = new_set.find(tree_to_errno_var(instr.var));
+               if (it!=new_set.end())
+               {
+                  if(!(*it==pseudo_errno))
+                     new_set.erase(it);
+               }
+            }
+            break;
+         case IC_RESTORE_ERRNO:
+            {
+               std::set<errno_var>::iterator it;
+               it = new_set.find(tree_to_errno_var(instr.var));
+               if (it!=new_set.end())
+               {
+                  new_set.insert(pseudo_errno); 
                }
                else
                {
-                  for(tree errno_var : status.errno_list)
-                     add_unique_to_list(errno_var, actual_status.errno_list);
+                  new_set.erase(pseudo_errno);
                }
             }
-            if(status.errno_changed)
-            {
-               if(!actual_status.errno_changed)
-                  actual_status.errno_loc=status.errno_loc;
-               actual_status.errno_changed=true;
-            }
-            if(status.errno_restored && actual_status.errno_stored)
-            {
-               if(is_var_in_list(status.restore_tree,actual_status.errno_list))
-                  actual_status.errno_changed=false;
-            }
-            actual_status.return_found=status.return_found;
-            actual_status.exit_found=status.exit_found;
             break;
-         }
+         case IC_RETURN:
+            {
+               std::set<errno_var>::iterator it;
+               it = new_set.find(pseudo_errno);
+               if (it==new_set.end())
+               {
+                  return true;
+               }
+            }
+            break;
+         case IC_EXIT:
+            return false;
+            break;
+         default:
+            break;
+            //this should never happen
       }
-      if(actual_status.exit_found)
-         continue;
-      if(actual_status.return_found)
+   }
+   if(status.block_id==1)
+   {
+      std::set<errno_var>::iterator it;
+      it = new_set.find(pseudo_errno);
+      if (it==new_set.end())
       {
-         if(actual_status.errno_changed)
+         return true;
+      }
+   }
+   if (!equal_sets(new_set,status.output_set))
+   {
+      status.output_set=new_set;
+      changed=true;
+   }
+   return false;
+}
+
+void analyze_CFG(my_data &obj)
+{
+   bool changed;
+   location_t err_loc;
+   do
+   {
+      changed=false;
+      for (bb_data &status : obj.block_status)
+      {
+         std::set<errno_var> new_set;
+         bool empty=true;
+         for(bb_link &link : obj.block_links)
          {
-            obj.errno_loc=actual_status.errno_loc;
+            if(link.successor==status.block_id)
+            {
+               //TODO own function for this
+               for (bb_data &block_data : obj.block_status)
+               {
+                  if(link.predecessor==block_data.block_id)
+                  {
+                     if(empty)
+                     {
+                        empty=false;
+                        new_set=block_data.output_set;
+                     }
+                     else
+                     {
+                        intersection(new_set,block_data.output_set);
+                     }
+                  }
+               }
+            }
+         }
+         if(status.computed && equal_sets(new_set,status.input_set))
+            continue;
+         if (!empty)
+            status.input_set=new_set;
+         if (compute_bb(status,err_loc,changed))
+         {
+            obj.errno_loc=err_loc;
             obj.errno_changed=true;
             return;
          }
-         continue;
       }
-      for(bb_link &link : obj.block_links)
-      {
-         if(link.predecessor==actual_status.block_id)
-         {
-            status_data tmp=actual_status;
-            tmp.block_id=link.successor;
-            status_list.push_back(tmp);
-         }
-      }
-   }
+   } while(changed);
 }
 
 //returns true if fnc is already a setter
@@ -493,10 +572,11 @@ void process_gimple_call(my_data &obj,bb_data &status,gimple * stmt, bool &all_o
       {
          if (call_errno_changed)
          {
-            if(!status.errno_changed)
-               status.errno_loc=gimple_location(stmt);
-            status.errno_changed=true;
-            status.errno_restored=false;
+            instruction new_instr; 
+            new_instr.ic=IC_CHANGE_ERRNO; 
+            new_instr.var=nullptr; 
+            new_instr.instr_loc=gimple_location(stmt);
+            status.instr_list.push_back(new_instr);
          }
          if (call_not_safe)
          {
@@ -523,10 +603,11 @@ void process_gimple_call(my_data &obj,bb_data &status,gimple * stmt, bool &all_o
       {
          if (call_errno_changed)
          {
-            if(!status.errno_changed)
-               status.errno_loc=gimple_location(stmt);
-            status.errno_changed=true;
-            status.errno_restored=false;
+            instruction new_instr; 
+            new_instr.ic=IC_CHANGE_ERRNO; 
+            new_instr.var=nullptr; 
+            new_instr.instr_loc=gimple_location(stmt);
+            status.instr_list.push_back(new_instr);
          }
          all_ok=false;
          dependencies_handled=false;
@@ -576,14 +657,20 @@ void process_gimple_call(my_data &obj,bb_data &status,gimple * stmt, bool &all_o
       //check if errno was not changed or exit was found
       if (return_number == 2)
       {
-         if(!status.errno_changed)
-            status.errno_loc=gimple_location(stmt);
-         status.errno_changed=true;
-         status.errno_restored=false;
+         instruction new_instr; 
+         new_instr.ic=IC_CHANGE_ERRNO; 
+         new_instr.var=nullptr; 
+         new_instr.instr_loc=gimple_location(stmt);
+         status.instr_list.push_back(new_instr);
       }
       else if (return_number == 4)
       {
-         status.exit_found=true;
+         //status.exit_found=true;
+         instruction new_instr; 
+         new_instr.ic=IC_EXIT; 
+         new_instr.var=nullptr; 
+         new_instr.instr_loc=gimple_location(stmt);
+         status.instr_list.push_back(new_instr);
       }
       
    }
@@ -605,7 +692,11 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
    //TODO(not important) maybe stored to another place from already stored errno(rare)
    if (TREE_CODE (l_var) == VAR_DECL && is_var_in_list(l_var,obj.stored_errno))
    {
-      unique_in_lists(l_var, status.destroyed_list, status.errno_list);
+      instruction new_instr; 
+      new_instr.ic=IC_DESTROY_STORAGE;
+      new_instr.var=l_var; 
+      new_instr.instr_loc=gimple_location(stmt);
+      status.instr_list.push_back(new_instr);
    }
    if (TREE_CODE (l_var) == MEM_REF)
    {
@@ -617,26 +708,21 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
       {
          if (errno_valid && errno_stored == SSA_NAME_VERSION (l_var))
          {
-            status.errno_restored=false;
             if (TREE_CODE (r_var) == VAR_DECL)
             {
-               if(is_var_in_list(r_var,obj.stored_errno))
-               {
-                  status.errno_restored=true;
-                  status.restore_tree=r_var;
-               }
-               else
-               {
-                  if (!status.errno_changed)
-                     status.errno_loc=gimple_location(stmt);
-                  status.errno_changed=true;
-               }
+               instruction new_instr; 
+               new_instr.ic=IC_RESTORE_ERRNO; 
+               new_instr.var=r_var; 
+               new_instr.instr_loc=gimple_location(stmt);
+               status.instr_list.push_back(new_instr);
             }
             else
             {
-               if (!status.errno_changed)
-                  status.errno_loc=gimple_location(stmt);
-               status.errno_changed=true;
+               instruction new_instr; 
+               new_instr.ic=IC_CHANGE_ERRNO; 
+               new_instr.var=nullptr; 
+               new_instr.instr_loc=gimple_location(stmt);
+               status.instr_list.push_back(new_instr);
             }
          } 
       }
@@ -649,26 +735,21 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
          {
             if (strcmp(name,errno_ref)==0)
             {
-               status.errno_restored=false;
                if (TREE_CODE (r_var) == VAR_DECL)
                {
-                  if(is_var_in_list(r_var,obj.stored_errno))
-                  {
-                     status.errno_restored=true;
-                     status.restore_tree=r_var;
-                  }
-                  else
-                  {
-                     if (!status.errno_changed)
-                        status.errno_loc=gimple_location(stmt);
-                     status.errno_changed=true;
-                  }
+                  instruction new_instr; 
+                  new_instr.ic=IC_RESTORE_ERRNO; 
+                  new_instr.var=r_var; 
+                  new_instr.instr_loc=gimple_location(stmt);
+                  status.instr_list.push_back(new_instr);
                }
                else
                {
-                  if (!status.errno_changed)
-                     status.errno_loc=gimple_location(stmt);
-                  status.errno_changed=true;
+                  instruction new_instr; 
+                  new_instr.ic=IC_CHANGE_ERRNO; 
+                  new_instr.var=nullptr; 
+                  new_instr.instr_loc=gimple_location(stmt);
+                  status.instr_list.push_back(new_instr);
                }
                break;
             }
@@ -683,15 +764,18 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
          return;
       if(TREE_CODE (r_var) == SSA_NAME)
       {
-         if (errno_valid && !status.errno_changed)
+         if (errno_valid)
          {
             if (errno_stored == SSA_NAME_VERSION (r_var))
             {
                if (TREE_CODE (l_var) == VAR_DECL)
                {
-                  status.errno_stored=true;
+                  instruction new_instr; 
+                  new_instr.ic=IC_SAVE_ERRNO; 
+                  new_instr.var=l_var; 
+                  new_instr.instr_loc=gimple_location(stmt);
+                  status.instr_list.push_back(new_instr);
                   add_unique_to_list(l_var, obj.stored_errno);
-                  unique_in_lists(l_var, status.errno_list, status.destroyed_list);
                }
             }
          }
@@ -703,14 +787,14 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
          {
             if (strcmp(name,errno_ref)==0)
             {
-               if(!status.errno_changed)
+               if (TREE_CODE (l_var) == VAR_DECL)
                {
-                  if (TREE_CODE (l_var) == VAR_DECL)
-                  {
-                     status.errno_stored=true;
-                     add_unique_to_list(l_var, obj.stored_errno);
-                     unique_in_lists(l_var, status.errno_list, status.destroyed_list);
-                  }
+                  instruction new_instr; 
+                  new_instr.ic=IC_SAVE_ERRNO; 
+                  new_instr.var=l_var; 
+                  new_instr.instr_loc=gimple_location(stmt);
+                  status.instr_list.push_back(new_instr);
+                  add_unique_to_list(l_var, obj.stored_errno);
                }
                break;
             }
@@ -791,6 +875,8 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
             bb_data status;
             status.block_id=bb->index;
             
+            {errno_var init; init.id=0; init.name=nullptr; status.input_set.insert(init); status.output_set.insert(init);}
+            
             gimple_stmt_iterator gsi;
             for (gsi = gsi_start_bb (bb); !gsi_end_p (gsi); gsi_next (&gsi))
             {
@@ -801,7 +887,12 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                {
                   if (gimple_predict_predictor (stmt)==PRED_TREE_EARLY_RETURN)
                   {
-                     status.return_found=true;
+                     instruction new_instr; 
+                     new_instr.ic=IC_RETURN; 
+                     new_instr.var=nullptr; 
+                     new_instr.instr_loc=gimple_location(stmt);
+                     status.instr_list.push_back(new_instr);
+                     //status.return_found=true;
                   }                  
                }
                else if (!obj.was_err && gimple_code(stmt)==GIMPLE_ASSIGN)
