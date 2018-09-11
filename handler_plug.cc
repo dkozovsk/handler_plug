@@ -46,11 +46,9 @@ void handle_dependencies() //TODO maybe extend errno check
       while(solved && !obj.depends.empty())
       {
          depend_data depends=obj.depends.front();
-         bool fatal=false;
-         bool not_safe=false;
          std::list<const char*> call_tree;
-         bool errno_changed=false;
-         if (scan_own_function(get_name(depends.fnc),not_safe,fatal,errno_changed,call_tree,nullptr))
+         int8_t return_number=scan_own_function(get_name(depends.fnc),call_tree,nullptr);
+         if (return_number < 99)
          {
             //TODO advanced check required
             //primitive check, error only if errno was changed and was never stored
@@ -63,19 +61,19 @@ void handle_dependencies() //TODO maybe extend errno check
                   print_errno_warning(obj.fnc_tree,depends.loc);
                }
             }*/
-            if (not_safe)
+            if (return_number <=0)
             {
                obj.not_safe=true;
                if (!obj.fatal)
-                  obj.fatal=fatal;
+                  obj.fatal=return_number==-1;
                if (obj.is_handler)
-                  print_warning(obj.fnc_tree,depends.fnc,depends.loc,fatal);
+                  print_warning(obj.fnc_tree,depends.fnc,depends.loc,return_number==-1);
                else
                {
                   remember_error new_err;
                   new_err.err_loc = depends.loc;
                   new_err.err_fnc = depends.fnc;
-                  new_err.err_fatal = fatal;
+                  new_err.err_fatal = return_number==-1;
                   obj.err_log.push_back(new_err);
                }
             }
@@ -470,6 +468,7 @@ tree give_me_handler(tree var,bool first)
 //        1 if it is safe and errno is not changed,
 //        2 if it is safe, but errno may be changed,
 //        4 if it is safe exit function
+//       -1 if it is asynchronous-unsafe
 int8_t is_handler_ok_fnc (const char* name)
 {
    if (!name)
@@ -555,63 +554,24 @@ void process_gimple_call(my_data &obj,bb_data &status,gimple * stmt, bool &all_o
    const char* called_function_name = get_name(fn_decl);
    if (!called_function_name)
       return;
-   int8_t return_number = 0;
+   int8_t return_number = 1;
    if (DECL_INITIAL  (fn_decl))
    {
-      depend_data save_dependencies;
-      save_dependencies.loc = gimple_location(stmt);
-      save_dependencies.fnc = fn_decl;
-      bool fatal_call=false;
-      bool call_not_safe=false;
-      bool call_errno_changed=false;
       // in case of recurse, do nothing
       if (strcmp(get_name(obj.fnc_tree),called_function_name)==0)
          return;
-      else if (scan_own_function(called_function_name,call_not_safe,fatal_call,
-                                 call_errno_changed,call_tree,nullptr))
-      {
-         if (call_errno_changed)
-         {
-            instruction new_instr; 
-            new_instr.ic=IC_CHANGE_ERRNO; 
-            new_instr.var=nullptr; 
-            new_instr.instr_loc=gimple_location(stmt);
-            status.instr_list.push_back(new_instr);
-         }
-         if (call_not_safe)
-         {
-            all_ok=false;
-            obj.not_safe=true;
-            
-            if (obj.is_handler)
-               print_warning(obj.fnc_tree,fn_decl,gimple_location(stmt),fatal_call);
-            else
-            {
-               remember_error new_err;
-               new_err.err_loc = gimple_location(stmt);
-               new_err.err_fnc = fn_decl;
-               new_err.err_fatal = fatal_call;
-               obj.err_log.push_back(new_err);
-            }
-         
-            if (!obj.fatal)
-               obj.fatal=fatal_call;
-            return;
-         }
-      }
       else
       {
-         if (call_errno_changed)
+         if ((return_number = scan_own_function(called_function_name,call_tree,nullptr))>=99)
          {
-            instruction new_instr; 
-            new_instr.ic=IC_CHANGE_ERRNO; 
-            new_instr.var=nullptr; 
-            new_instr.instr_loc=gimple_location(stmt);
-            status.instr_list.push_back(new_instr);
+            return_number-=100;
+            depend_data save_dependencies;
+            save_dependencies.loc = gimple_location(stmt);
+            save_dependencies.fnc = fn_decl;
+            all_ok=false;
+            dependencies_handled=false;
+            obj.depends.push_front(save_dependencies);
          }
-         all_ok=false;
-         dependencies_handled=false;
-         obj.depends.push_front(save_dependencies);
       }
    }
    else
@@ -633,46 +593,50 @@ void process_gimple_call(my_data &obj,bb_data &status,gimple * stmt, bool &all_o
             }
          }
       }
-      else if((return_number = is_handler_ok_fnc(called_function_name)) <= 0)
+      else
       {
-         all_ok=false;
-         obj.not_safe=true;
-         
-         if (obj.is_handler)
-            print_warning(obj.fnc_tree,fn_decl,gimple_location(stmt),return_number==-1);
-         else
-         {
-            remember_error new_err;
-            new_err.err_loc = gimple_location(stmt);
-            new_err.err_fnc = fn_decl;
-            new_err.err_fatal = return_number==-1;
-            obj.err_log.push_back(new_err);
-         }
-         
-         if (return_number == -1)
-            obj.fatal=true;
-         
-         return;
+         return_number = is_handler_ok_fnc(called_function_name);
       }
-      //check if errno was not changed or exit was found
-      if (return_number == 2)
+   }
+   //check for wrong function
+   if (return_number <= 0)
+   {
+      all_ok=false;
+      obj.not_safe=true;
+      
+      if (obj.is_handler)
+         print_warning(obj.fnc_tree,fn_decl,gimple_location(stmt),return_number==-1);
+      else
       {
-         instruction new_instr; 
-         new_instr.ic=IC_CHANGE_ERRNO; 
-         new_instr.var=nullptr; 
-         new_instr.instr_loc=gimple_location(stmt);
-         status.instr_list.push_back(new_instr);
-      }
-      else if (return_number == 4)
-      {
-         //status.exit_found=true;
-         instruction new_instr; 
-         new_instr.ic=IC_EXIT; 
-         new_instr.var=nullptr; 
-         new_instr.instr_loc=gimple_location(stmt);
-         status.instr_list.push_back(new_instr);
+         remember_error new_err;
+         new_err.err_loc = gimple_location(stmt);
+         new_err.err_fnc = fn_decl;
+         new_err.err_fatal = return_number==-1;
+         obj.err_log.push_back(new_err);
       }
       
+      if (return_number == -1)
+         obj.fatal=true;
+      
+      return;
+   }
+   //check if errno was not changed or exit was found
+   else if (return_number == 2)
+   {
+      instruction new_instr; 
+      new_instr.ic=IC_CHANGE_ERRNO; 
+      new_instr.var=nullptr; 
+      new_instr.instr_loc=gimple_location(stmt);
+      status.instr_list.push_back(new_instr);
+   }
+   else if (return_number == 4)
+   {
+      //status.exit_found=true;
+      instruction new_instr; 
+      new_instr.ic=IC_EXIT; 
+      new_instr.var=nullptr; 
+      new_instr.instr_loc=gimple_location(stmt);
+      status.instr_list.push_back(new_instr);
    }
 }
 
@@ -805,21 +769,23 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
 
 /* scan user declared function for asynchronous-unsafe functions
    name contains name of function, which should be scaned
-   not_safe returns true to this function, if the scaned function is not asynchronous-safe
-   fatal returns true to this function if the scaned function is asynchronous-unsafe
-   errno_err returns true if scaned function may change errno
    call_tree is list of nested calls of functions, it is necesery for recurse
    handler_found if this pointer is set, scaned function is handler and returns there, if handler was found or not
-   this function returns true, if function was scaned succesfully
+   returns 0 when function is not asynchronous-safe, 
+           1 if it is safe and errno is not changed,
+           2 if it is safe, but errno may be changed,
+           4 if it is safe exit function
+          -1 if it is asynchronous-unsafe
+           this codes + 100 if it has unsolved dependencies
 */
-bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
-                        bool &errno_err, std::list<const char*> &call_tree,bool *handler_found) 
+int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,bool *handler_found) 
 {
+   int8_t return_number=1;
    //check for undirect recurse and should stop infinite call of this function
    for (const char* fnc: call_tree)
    {
       if (strcmp(name,fnc)==0)
-         return true;
+         return return_number;
    }
    call_tree.push_back(name);
    basic_block bb;
@@ -839,10 +805,10 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
             if (obj.errno_changed && !obj.is_handler)
                print_errno_warning(obj.fnc_tree,obj.errno_loc);
             if (obj.is_handler &&  (obj.not_safe || obj.is_ok) )
-               return true;
+               return return_number;
             obj.is_handler=true;
             if (obj.is_ok)
-               return true;
+               return return_number;
             if (obj.not_safe)
             {
                while (!obj.err_log.empty())
@@ -858,15 +824,17 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
          {
             if (obj.not_safe)
             {
-               not_safe=true;
-               fatal=obj.fatal;
+               if (obj.fatal)
+                  return_number=-1;
+               else
+                  return_number=0;
                call_tree.pop_back();
-               return true;
+               return return_number;
             }
             if (obj.is_ok)
             {
                call_tree.pop_back();
-               return true;
+               return return_number;
             }
          }
          all_ok=true;
@@ -916,8 +884,6 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                }
             }
          }
-         not_safe=obj.not_safe;
-         fatal=obj.fatal;
          //TODO analyze control flow
          if (!obj.was_err)
          {
@@ -928,17 +894,25 @@ bool scan_own_function (const char* name, bool &not_safe, bool &fatal,
                print_errno_warning(obj.fnc_tree,obj.errno_loc);
             }
          }
-         if (not_safe)
+         if (obj.fatal)
+            return_number=-1;
+         else if (obj.not_safe)
+            return_number=0;
+         else if (obj.errno_changed)
+            return_number=2;
+         if (return_number<=0)
          {
             call_tree.pop_back();
-            return true;
+            return return_number;
          }
          // if everything scaned succefully function is asynchronous-safe
          obj.is_ok=all_ok;
       }
    }
    call_tree.pop_back();
-   return all_ok;
+   if (!all_ok)
+      return_number+=100;
+   return return_number;
 }
 
 //print warning about non asynchronous-safe function 'fnc' in signal handler 'handler'
@@ -1147,11 +1121,8 @@ struct handler_check_pass : gimple_opt_pass
          if (handler != nullptr)
          {
             bool found=false;
-            bool fatal=false;
-            bool not_safe=false;
-            bool errno_changed=false;
             std::list<const char*> call_tree;
-            scan_own_function(get_name(handler),not_safe,fatal,errno_changed,call_tree,&found);
+            scan_own_function(get_name(handler),call_tree,&found);
             if (!found)
                break;
             else

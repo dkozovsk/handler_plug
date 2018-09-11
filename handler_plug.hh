@@ -109,7 +109,7 @@ void process_gimple_call(my_data &obj,bb_data &status,gimple * stmt, bool &all_o
                            bool &errno_valid, unsigned int &errno_stored, std::list<const char*> &errno_ptr);
 void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &errno_valid,
                            unsigned int &errno_stored, std::list<const char*> &errno_ptr);
-bool scan_own_function (const char* name,bool &not_safe,bool &fatal,bool &errno_err,std::list<const char*> &call_tree,bool *handler_found);
+int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,bool *handler_found);
 tree give_me_handler(tree var,bool first);
 tree scan_own_handler_setter(gimple* stmt, tree fun_decl);
 //CFG analisys
