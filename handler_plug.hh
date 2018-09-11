@@ -91,6 +91,7 @@ struct my_data {
     bool not_safe=false;
     bool was_err=false;
     bool fatal=false; 
+    bool is_exit=false;
     std::list<remember_error> err_log;
     std::list<depend_data> depends;
     

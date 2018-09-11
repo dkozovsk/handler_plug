@@ -10,11 +10,14 @@ static bool added_new_setter=false;
 
 static const char * const plugin_name = "handler_plug";
 
+//this variable represents errno in the analysis
 static const errno_var pseudo_errno={ 
    .id=0, 
    .name=nullptr
 };
 
+//bool operators for comparing errno_var 
+//others bool operators can be substituted using this two
 bool operator< (const errno_var &a, const errno_var &b)
 {
    if (!a.name)
@@ -38,64 +41,77 @@ bool operator== (const errno_var &a, const errno_var &b)
 void handle_dependencies() //TODO maybe extend errno check
 {
    bool all_solved=true;
-   for (my_data &obj: fnc_list)
+   bool nothing_solved=false;
+   while(!nothing_solved)
    {
-      bool solved=true;
-      if (obj.not_safe || obj.is_ok)
-         continue;
-      while(solved && !obj.depends.empty())
+      nothing_solved=true;
+      all_solved=true;
+      for (my_data &obj: fnc_list)
       {
-         depend_data depends=obj.depends.front();
-         std::list<const char*> call_tree;
-         int8_t return_number=scan_own_function(get_name(depends.fnc),call_tree,nullptr);
-         if (return_number < 99)
-         {
-            //TODO advanced check required
-            //primitive check, error only if errno was changed and was never stored
-            /*if (errno_changed && !obj.errno_changed && !obj.was_err)
-            {
-               if (obj.stored_errno.empty())
-               {
-                  obj.errno_changed=true;
-                  obj.was_err =true;
-                  print_errno_warning(obj.fnc_tree,depends.loc);
-               }
-            }*/
-            if (return_number <=0)
-            {
-               obj.not_safe=true;
-               if (!obj.fatal)
-                  obj.fatal=return_number==-1;
-               if (obj.is_handler)
-                  print_warning(obj.fnc_tree,depends.fnc,depends.loc,return_number==-1);
-               else
-               {
-                  remember_error new_err;
-                  new_err.err_loc = depends.loc;
-                  new_err.err_fnc = depends.fnc;
-                  new_err.err_fatal = return_number==-1;
-                  obj.err_log.push_back(new_err);
-               }
-            }
-            obj.depends.pop_front();
-         }
-         else
-         {
+         bool solved=true;
+         if (obj.is_ok)
+            continue;
+         if (obj.depends.empty())
             solved=false;
-            all_solved=false;
+         while(solved && !obj.depends.empty())
+         {
+            depend_data depends=obj.depends.front();
+            std::list<const char*> call_tree;
+            int8_t return_number=scan_own_function(get_name(depends.fnc),call_tree,nullptr);
+            if (return_number < 99)
+            {
+               //TODO advanced check required
+               //primitive check, error only if errno was changed and was never stored
+               /*if (errno_changed && !obj.errno_changed && !obj.was_err)
+               {
+                  if (obj.stored_errno.empty())
+                  {
+                     obj.errno_changed=true;
+                     obj.was_err =true;
+                     print_errno_warning(obj.fnc_tree,depends.loc);
+                  }
+               }*/
+               if (return_number <=0)
+               {
+                  obj.not_safe=true;
+                  if (!obj.fatal)
+                     obj.fatal=return_number==-1;
+                  if (obj.is_handler)
+                     print_warning(obj.fnc_tree,depends.fnc,depends.loc,return_number==-1);
+                  else
+                  {
+                     remember_error new_err;
+                     new_err.err_loc = depends.loc;
+                     new_err.err_fnc = depends.fnc;
+                     new_err.err_fatal = return_number==-1;
+                     obj.err_log.push_back(new_err);
+                  }
+               }
+               obj.depends.pop_front();
+            }
+            else
+            {
+               
+               solved=false;
+               all_solved=false;
+            }
          }
+         if (solved)
+            nothing_solved=false;
       }
    }
    if (all_solved)
       dependencies_handled=true;
 }
 
+//add to list only if variable is not already in the list
 void add_unique_to_list(tree var, std::list<tree> &list)
 {
    if (!is_var_in_list(var,list))
       list.push_back(var);
 }
 
+//returns true if variable var is already located in the list
 bool is_var_in_list(tree var, std::list<tree> &list)
 {
    for(tree list_var : list)
@@ -113,6 +129,7 @@ bool is_var_in_list(tree var, std::list<tree> &list)
    return false;
 }
 
+//intersection of two set to destination set(source set is unchanged)
 void intersection(std::set<errno_var> &destination,std::set<errno_var> &source)
 {
    std::set<errno_var>::iterator it=destination.begin();
@@ -126,6 +143,7 @@ void intersection(std::set<errno_var> &destination,std::set<errno_var> &source)
       }
    }
 }
+//returns true if two sets are equal
 bool equal_sets(std::set<errno_var> &a,std::set<errno_var> &b)
 {
    std::set<errno_var>::iterator it_a=a.begin();
@@ -142,6 +160,7 @@ bool equal_sets(std::set<errno_var> &a,std::set<errno_var> &b)
    return true;
 }
 
+//returns errno_var type variable from tree type variable
 errno_var tree_to_errno_var(tree var)
 {
    errno_var new_var;
@@ -152,6 +171,7 @@ errno_var tree_to_errno_var(tree var)
    return new_var;
 }
 
+//compute output set from imput set for one basic block
 bool compute_bb(bb_data &status, location_t &err_loc,bool &changed)
 {
    status.computed=true;
@@ -215,6 +235,7 @@ bool compute_bb(bb_data &status, location_t &err_loc,bool &changed)
                {
                   return true;
                }
+               return false;
             }
             break;
          case IC_EXIT:
@@ -233,6 +254,7 @@ bool compute_bb(bb_data &status, location_t &err_loc,bool &changed)
       {
          return true;
       }
+      return false;
    }
    if (!equal_sets(new_set,status.output_set))
    {
@@ -242,8 +264,10 @@ bool compute_bb(bb_data &status, location_t &err_loc,bool &changed)
    return false;
 }
 
+//analyze CFG for one function
 void analyze_CFG(my_data &obj)
 {
+   //TODO analyze if it is own exit function
    bool changed;
    location_t err_loc;
    do
@@ -257,7 +281,7 @@ void analyze_CFG(my_data &obj)
          {
             if(link.successor==status.block_id)
             {
-               //TODO own function for this
+               //TODO maybe own function for this?
                for (bb_data &block_data : obj.block_status)
                {
                   if(link.predecessor==block_data.block_id)
@@ -785,7 +809,7 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
    for (const char* fnc: call_tree)
    {
       if (strcmp(name,fnc)==0)
-         return return_number;
+         return 101;
    }
    call_tree.push_back(name);
    basic_block bb;
@@ -843,7 +867,8 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
             bb_data status;
             status.block_id=bb->index;
             
-            {errno_var init; init.id=0; init.name=nullptr; status.input_set.insert(init); status.output_set.insert(init);}
+            status.input_set.insert(pseudo_errno);
+            status.output_set.insert(pseudo_errno);
             
             gimple_stmt_iterator gsi;
             for (gsi = gsi_start_bb (bb); !gsi_end_p (gsi); gsi_next (&gsi))
@@ -860,7 +885,6 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
                      new_instr.var=nullptr; 
                      new_instr.instr_loc=gimple_location(stmt);
                      status.instr_list.push_back(new_instr);
-                     //status.return_found=true;
                   }                  
                }
                else if (!obj.was_err && gimple_code(stmt)==GIMPLE_ASSIGN)
@@ -869,8 +893,6 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
             if (!obj.was_err)
             {
                obj.block_status.push_back(status);
-               //TODO store info about control flow, more structures needed, errno info about block, not functions
-               //TODO analyze control flow graph using stored informations about blocks, print error if there is way that may change errno
                edge e;
                edge_iterator ei;
           
@@ -884,7 +906,6 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
                }
             }
          }
-         //TODO analyze control flow
          if (!obj.was_err)
          {
             analyze_CFG(obj);
@@ -900,6 +921,8 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
             return_number=0;
          else if (obj.errno_changed)
             return_number=2;
+         else if (obj.is_exit)
+            return_number=4;
          if (return_number<=0)
          {
             call_tree.pop_back();
@@ -1103,7 +1126,6 @@ struct handler_check_pass : gimple_opt_pass
                      handler = scan_own_handler_setter(stmt,obj.fnc_tree);
                      if (handler!=nullptr)
                      {
-                        //std::cerr << "‘\033[1;1m signal handler " << get_name(handler) << " found \033[0m‘\n";
                         handlers.push_front(handler);
                         handler=nullptr;
                      }
