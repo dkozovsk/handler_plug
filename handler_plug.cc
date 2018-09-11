@@ -669,10 +669,6 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
 {
    //check if errno was stored or restored
    //TODO more possible conditions, extend errno check
-   /*
-    * TODO(important) destroy stored errno !!! 
-    * (another list for CFG analysis, destroyed, stored, only in one of these list always)
-   */
    tree r_var = gimple_assign_rhs1 (stmt);
    tree l_var = gimple_assign_lhs (stmt);
    if (!r_var || !l_var)
@@ -802,7 +798,7 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
           -1 if it is asynchronous-unsafe
            this codes + 100 if it has unsolved dependencies
 */
-int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,bool *handler_found) 
+int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,bool *handler_found)
 {
    int8_t return_number=1;
    //check for undirect recurse and should stop infinite call of this function
@@ -810,6 +806,10 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
    {
       if (strcmp(name,fnc)==0)
          return 101;
+      //this means that this function is ok, bud wasn't scand entirely
+      //(can't scan this function, because it undirectly depends on itself), 
+      //function that called this function will depend on this function
+      //this should be solved in handle_dependencies()
    }
    call_tree.push_back(name);
    basic_block bb;
