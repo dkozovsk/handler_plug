@@ -268,6 +268,23 @@ bool compute_bb(bb_data &status, location_t &err_loc,bool &changed)
 void analyze_CFG(my_data &obj)
 {
    //TODO analyze if it is own exit function
+   obj.is_exit=true;
+   for(bb_link &link : obj.block_links)
+   {
+      if(link.successor==1)//function exit point
+      {
+         for (bb_data &block_data : obj.block_status)
+         {
+            if(link.predecessor==block_data.block_id)
+            {
+               if(!block_data.is_exit)
+                  obj.is_exit=false;
+            }
+         }
+      }
+   }
+   if(obj.is_exit)
+      return;
    bool changed;
    location_t err_loc;
    do
@@ -661,6 +678,7 @@ void process_gimple_call(my_data &obj,bb_data &status,gimple * stmt, bool &all_o
       new_instr.var=nullptr; 
       new_instr.instr_loc=gimple_location(stmt);
       status.instr_list.push_back(new_instr);
+      status.is_exit=true;
    }
 }
 
@@ -855,7 +873,17 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
                call_tree.pop_back();
                return return_number;
             }
-            if (obj.is_ok)
+            else if (obj.errno_changed)
+            {
+               call_tree.pop_back();
+               return 2;
+            }
+            else if (obj.is_exit)
+            {
+               call_tree.pop_back();
+               return 4;
+            }
+            else if (obj.is_ok)
             {
                call_tree.pop_back();
                return return_number;

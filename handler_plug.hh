@@ -61,6 +61,7 @@ struct instruction {
 struct bb_data {
 	unsigned int block_id;
 	bool computed=false;
+	bool is_exit=false;
 	std::list<instruction> instr_list;
 	std::set<errno_var> input_set;
 	std::set<errno_var> output_set;
