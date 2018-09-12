@@ -15,10 +15,29 @@
 #include "tree-pretty-print.h"
 #include "gimple-pretty-print.h"
 
+
+enum instruction_code {
+	IC_CHANGE_ERRNO,
+	IC_SAVE_ERRNO,
+	IC_DESTROY_STORAGE,
+	IC_RESTORE_ERRNO,
+	IC_RETURN,
+	IC_EXIT,
+	IC_DEPEND
+};
+
+struct instruction {
+	instruction_code ic;
+	tree var;
+	location_t instr_loc;
+};
+
 // struct for remembering dependencies across functions
 struct depend_data {
   tree fnc;
   location_t loc;
+  unsigned int parent_block_id;
+  unsigned int parent_instr_loc;
 };
 
 //struct for remembering assigned functions to sigaction struct variables
@@ -43,21 +62,6 @@ struct errno_var {
 	const char *name;
 };
 
-enum instruction_code {
-	IC_CHANGE_ERRNO,
-	IC_SAVE_ERRNO,
-	IC_DESTROY_STORAGE,
-	IC_RESTORE_ERRNO,
-	IC_RETURN,
-	IC_EXIT
-};
-
-struct instruction {
-	instruction_code ic;
-	tree var;
-	location_t instr_loc;
-};
-
 struct bb_data {
 	unsigned int block_id;
 	bool computed=false;
@@ -65,17 +69,6 @@ struct bb_data {
 	std::list<instruction> instr_list;
 	std::set<errno_var> input_set;
 	std::set<errno_var> output_set;
-};
-
-struct status_data {
-	unsigned int block_id=0;
-	location_t errno_loc;
-	bool errno_changed=false;
-	bool errno_stored=false;
-	bool return_found=false;
-	bool exit_found=false;
-	std::list<unsigned int> visited;
-	std::list<tree> errno_list;
 };
 
 struct bb_link {

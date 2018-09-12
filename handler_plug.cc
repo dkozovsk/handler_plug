@@ -38,7 +38,7 @@ bool operator== (const errno_var &a, const errno_var &b)
 }
 
 //scan functions which are defined after the scan of function, which called them
-void handle_dependencies() //TODO maybe extend errno check
+void handle_dependencies()
 {
    bool all_solved=true;
    bool nothing_solved=false;
@@ -60,17 +60,32 @@ void handle_dependencies() //TODO maybe extend errno check
             int8_t return_number=scan_own_function(get_name(depends.fnc),call_tree,nullptr);
             if (return_number < 99)
             {
-               //TODO advanced check required
-               //primitive check, error only if errno was changed and was never stored
-               /*if (errno_changed && !obj.errno_changed && !obj.was_err)
+               //if call of this function may change errno and there was no error again do CFG analysis
+               if (return_number == 2 && !obj.was_err)
                {
-                  if (obj.stored_errno.empty())
+                  for (bb_data &block_data : obj.block_status)
                   {
-                     obj.errno_changed=true;
-                     obj.was_err =true;
-                     print_errno_warning(obj.fnc_tree,depends.loc);
+                     if(depends.parent_block_id==block_data.block_id)
+                     {
+                        if(block_data.instr_list.empty())
+                           break;
+                        std::list<instruction>::iterator it=block_data.instr_list.begin();
+                        for(unsigned int i = 1; i < depends.parent_instr_loc;i++)
+                        {
+                           ++it;
+                        }
+                        it->ic=IC_CHANGE_ERRNO;
+                        block_data.computed=false;
+                        break;
+                     }
                   }
-               }*/
+                  analyze_CFG(obj);
+                  if (obj.errno_changed && obj.is_handler)
+                  {
+                     obj.was_err =true;
+                     print_errno_warning(obj.fnc_tree,obj.errno_loc);
+                  }
+               }
                if (return_number <=0)
                {
                   obj.not_safe=true;
@@ -143,6 +158,7 @@ void intersection(std::set<errno_var> &destination,std::set<errno_var> &source)
       }
    }
 }
+
 //returns true if two sets are equal
 bool equal_sets(std::set<errno_var> &a,std::set<errno_var> &b)
 {
@@ -241,9 +257,11 @@ bool compute_bb(bb_data &status, location_t &err_loc,bool &changed)
          case IC_EXIT:
             return false;
             break;
-         default:
+         case IC_DEPEND:
             break;
+         default:
             //this should never happen
+            break;
       }
    }
    if(status.block_id==1)
@@ -267,11 +285,13 @@ bool compute_bb(bb_data &status, location_t &err_loc,bool &changed)
 //analyze CFG for one function
 void analyze_CFG(my_data &obj)
 {
-   //TODO analyze if it is own exit function
+   //analyze if it is own exit function
+   //that means that all predecessors of exit block must
+   //contain some asynchronous-safe exit function
    obj.is_exit=true;
    for(bb_link &link : obj.block_links)
    {
-      if(link.successor==1)//function exit point
+      if(link.successor==1)//block with ID 1 is exit block in function
       {
          for (bb_data &block_data : obj.block_status)
          {
@@ -294,11 +314,12 @@ void analyze_CFG(my_data &obj)
       {
          std::set<errno_var> new_set;
          bool empty=true;
+         //compute input set for block as intersection of output sets
+         //of all blocks that are predecessors for computed block
          for(bb_link &link : obj.block_links)
          {
             if(link.successor==status.block_id)
             {
-               //TODO maybe own function for this?
                for (bb_data &block_data : obj.block_status)
                {
                   if(link.predecessor==block_data.block_id)
@@ -312,6 +333,7 @@ void analyze_CFG(my_data &obj)
                      {
                         intersection(new_set,block_data.output_set);
                      }
+                     break;
                   }
                }
             }
@@ -478,6 +500,7 @@ tree scan_own_handler_setter(gimple* stmt,tree fun_decl)
 //first indicate if the function is called for the first time, second call is recursive
 tree give_me_handler(tree var,bool first)
 {
+   //inspired from code in gimple-pretty-print.c
    if (TREE_CODE(var)==CONSTRUCTOR)
    {
       unsigned HOST_WIDE_INT ix;
@@ -609,6 +632,15 @@ void process_gimple_call(my_data &obj,bb_data &status,gimple * stmt, bool &all_o
             depend_data save_dependencies;
             save_dependencies.loc = gimple_location(stmt);
             save_dependencies.fnc = fn_decl;
+            
+            instruction new_instr; 
+            new_instr.ic=IC_DEPEND; 
+            new_instr.var=nullptr; 
+            new_instr.instr_loc=gimple_location(stmt);
+            status.instr_list.push_back(new_instr);
+            save_dependencies.parent_instr_loc=status.instr_list.size();
+            save_dependencies.parent_block_id=status.block_id;
+            
             all_ok=false;
             dependencies_handled=false;
             obj.depends.push_front(save_dependencies);
@@ -824,7 +856,7 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
    {
       if (strcmp(name,fnc)==0)
          return 101;
-      //this means that this function is ok, bud wasn't scand entirely
+      //this means that this function is ok, but wasn't scaned entirely
       //(can't scan this function, because it undirectly depends on itself), 
       //function that called this function will depend on this function
       //this should be solved in handle_dependencies()
@@ -845,7 +877,10 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
          {
             *handler_found=true;
             if (obj.errno_changed && !obj.is_handler)
+            {
+               obj.was_err=true;
                print_errno_warning(obj.fnc_tree,obj.errno_loc);
+            }
             if (obj.is_handler &&  (obj.not_safe || obj.is_ok) )
                return return_number;
             obj.is_handler=true;
@@ -956,7 +991,7 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
             call_tree.pop_back();
             return return_number;
          }
-         // if everything scaned succefully function is asynchronous-safe
+         // if everything scaned succesfully function is asynchronous-safe
          obj.is_ok=all_ok;
       }
    }
