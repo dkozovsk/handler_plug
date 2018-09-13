@@ -19,6 +19,7 @@
 enum instruction_code {
 	IC_CHANGE_ERRNO,
 	IC_SAVE_ERRNO,
+	IC_SAVE_FROM_VAR,
 	IC_DESTROY_STORAGE,
 	IC_RESTORE_ERRNO,
 	IC_RETURN,
@@ -28,7 +29,8 @@ enum instruction_code {
 
 struct instruction {
 	instruction_code ic;
-	tree var;
+	tree var=nullptr;
+	tree from_var=nullptr;
 	location_t instr_loc;
 };
 

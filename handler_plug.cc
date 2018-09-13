@@ -218,6 +218,22 @@ bool compute_bb(bb_data &status, location_t &err_loc,bool &changed)
                }
             }
             break;
+         case IC_SAVE_FROM_VAR:
+            {
+               std::set<errno_var>::iterator it;
+               errno_var var=tree_to_errno_var(instr.from_var);
+               if (var==pseudo_errno)
+                  break;
+               it = new_set.find(var);
+               if (it!=new_set.end())
+               {
+                  errno_var new_var=tree_to_errno_var(instr.var);
+                  if (new_var==pseudo_errno)
+                     break;
+                  new_set.insert(new_var);
+               }
+            }
+            break;
          case IC_DESTROY_STORAGE:
             {
                std::set<errno_var>::iterator it;
@@ -239,7 +255,13 @@ bool compute_bb(bb_data &status, location_t &err_loc,bool &changed)
                }
                else
                {
-                  new_set.erase(pseudo_errno);
+                  std::set<errno_var>::iterator it;
+                  it = new_set.find(pseudo_errno);
+                  if (it!=new_set.end())
+                  {
+                     err_loc=instr.instr_loc;
+                     new_set.erase(it);
+                  }
                }
             }
             break;
@@ -715,15 +737,15 @@ void process_gimple_call(my_data &obj,bb_data &status,gimple * stmt, bool &all_o
 }
 
 void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &errno_valid,
-                           unsigned int &errno_stored, std::list<const char*> &errno_ptr)
+                           unsigned int &errno_stored, std::list<const char*> &errno_ptr)//TODO change errno_ptr from const char* to tree
 {
    //check if errno was stored or restored
-   //TODO more possible conditions, extend errno check
    tree r_var = gimple_assign_rhs1 (stmt);
    tree l_var = gimple_assign_lhs (stmt);
    if (!r_var || !l_var)
       return;
-   //TODO(not important) maybe stored to another place from already stored errno(rare)
+   //if the l_var contain stored errno, destroy it
+   //(if you try to store to variable again, it will be represented as two instructions, first destroy, then store)
    if (TREE_CODE (l_var) == VAR_DECL && is_var_in_list(l_var,obj.stored_errno))
    {
       instruction new_instr; 
@@ -732,7 +754,21 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
       new_instr.instr_loc=gimple_location(stmt);
       status.instr_list.push_back(new_instr);
    }
-   if (TREE_CODE (l_var) == MEM_REF)
+   //store or restore check
+   if (TREE_CODE (l_var) == VAR_DECL && TREE_CODE (r_var) == VAR_DECL)
+   {
+      if (is_var_in_list(r_var,obj.stored_errno))
+      {
+         instruction new_instr; 
+         new_instr.ic=IC_SAVE_FROM_VAR;
+         new_instr.var=l_var;
+         new_instr.from_var=r_var;
+         new_instr.instr_loc=gimple_location(stmt);
+         status.instr_list.push_back(new_instr);
+         add_unique_to_list(l_var, obj.stored_errno);
+      }
+   }
+   else if (TREE_CODE (l_var) == MEM_REF)
    {
       //get ID of mem_ref SSA_NAME variable(build in variable)
       l_var = TREE_OPERAND (l_var, 0);
