@@ -632,7 +632,7 @@ bool is_handler_wrong_fnc(const char* name)
 }
 
 void process_gimple_call(my_data &obj,bb_data &status,gimple * stmt, bool &all_ok, std::list<const char*> &call_tree,
-                           bool &errno_valid, unsigned int &errno_stored, std::list<const char*> &errno_ptr)
+                           bool &errno_valid, unsigned int &errno_stored, std::list<tree> &errno_ptr)
 {
    tree fn_decl = gimple_call_fndecl(stmt);
    if (!fn_decl)
@@ -684,7 +684,7 @@ void process_gimple_call(my_data &obj,bb_data &status,gimple * stmt, bool &all_o
             const char* var_name = get_name(var);
             if (var_name)
             {
-               errno_ptr.push_front(var_name);
+               errno_ptr.push_front(var);
             }
          }
       }
@@ -737,7 +737,7 @@ void process_gimple_call(my_data &obj,bb_data &status,gimple * stmt, bool &all_o
 }
 
 void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &errno_valid,
-                           unsigned int &errno_stored, std::list<const char*> &errno_ptr)//TODO change errno_ptr from const char* to tree
+                           unsigned int &errno_stored, std::list<tree> &errno_ptr)//TODO change errno_ptr from const char* to tree
 {
    //check if errno was stored or restored
    tree r_var = gimple_assign_rhs1 (stmt);
@@ -798,30 +798,23 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
       }
       else if (TREE_CODE (l_var) == VAR_DECL)
       {
-         const char* name = get_name(l_var);
-         if(!name)
-            return;
-         for(const char* errno_ref : errno_ptr)
+         if (is_var_in_list(l_var,errno_ptr))
          {
-            if (strcmp(name,errno_ref)==0)
+            if (TREE_CODE (r_var) == VAR_DECL)
             {
-               if (TREE_CODE (r_var) == VAR_DECL)
-               {
-                  instruction new_instr; 
-                  new_instr.ic=IC_RESTORE_ERRNO; 
-                  new_instr.var=r_var; 
-                  new_instr.instr_loc=gimple_location(stmt);
-                  status.instr_list.push_back(new_instr);
-               }
-               else
-               {
-                  instruction new_instr; 
-                  new_instr.ic=IC_CHANGE_ERRNO; 
-                  new_instr.var=nullptr; 
-                  new_instr.instr_loc=gimple_location(stmt);
-                  status.instr_list.push_back(new_instr);
-               }
-               break;
+               instruction new_instr; 
+               new_instr.ic=IC_RESTORE_ERRNO; 
+               new_instr.var=r_var; 
+               new_instr.instr_loc=gimple_location(stmt);
+               status.instr_list.push_back(new_instr);
+            }
+            else
+            {
+               instruction new_instr; 
+               new_instr.ic=IC_CHANGE_ERRNO; 
+               new_instr.var=nullptr; 
+               new_instr.instr_loc=gimple_location(stmt);
+               status.instr_list.push_back(new_instr);
             }
          }
       }
@@ -852,21 +845,16 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
       }
       else if(TREE_CODE (r_var) == VAR_DECL)
       {
-         const char* name = get_name(r_var);
-         for(const char* errno_ref : errno_ptr)
+         if (is_var_in_list(r_var,errno_ptr))
          {
-            if (strcmp(name,errno_ref)==0)
+            if (TREE_CODE (l_var) == VAR_DECL)
             {
-               if (TREE_CODE (l_var) == VAR_DECL)
-               {
-                  instruction new_instr; 
-                  new_instr.ic=IC_SAVE_ERRNO; 
-                  new_instr.var=l_var; 
-                  new_instr.instr_loc=gimple_location(stmt);
-                  status.instr_list.push_back(new_instr);
-                  add_unique_to_list(l_var, obj.stored_errno);
-               }
-               break;
+               instruction new_instr; 
+               new_instr.ic=IC_SAVE_ERRNO; 
+               new_instr.var=l_var; 
+               new_instr.instr_loc=gimple_location(stmt);
+               status.instr_list.push_back(new_instr);
+               add_unique_to_list(l_var, obj.stored_errno);
             }
          }
       }
@@ -903,7 +891,7 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
    
    bool errno_valid=false;
    unsigned int errno_stored=0;
-   std::list<const char*> errno_ptr;
+   std::list<tree> errno_ptr;
    
    for (my_data &obj: fnc_list)
    {
