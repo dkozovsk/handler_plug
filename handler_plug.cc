@@ -657,6 +657,8 @@ void process_gimple_call(my_data &obj,bb_data &status,gimple * stmt, bool &all_o
             save_dependencies.loc = gimple_location(stmt);
             save_dependencies.fnc = fn_decl;
             
+            //unscaned function, it can be found later, that it changes errno
+            //(special instruction as placeholder for this change)
             instruction new_instr; 
             new_instr.ic=IC_DEPEND; 
             new_instr.var=nullptr; 
@@ -870,10 +872,12 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
            2 if it is safe, but errno may be changed,
            4 if it is safe exit function
           -1 if it is asynchronous-unsafe
-           this codes + 100 if it has unsolved dependencies
+           this codes + 100 if it has unsolved dependencies (0 and -1 excluded)
 */
 int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,bool *handler_found)
 {
+   if (!name)
+      return 1;
    int8_t return_number=1;
    //check for undirect recurse and should stop infinite call of this function
    for (const char* fnc: call_tree)
