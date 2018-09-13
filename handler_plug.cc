@@ -737,7 +737,7 @@ void process_gimple_call(my_data &obj,bb_data &status,gimple * stmt, bool &all_o
 }
 
 void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &errno_valid,
-                           unsigned int &errno_stored, std::list<tree> &errno_ptr)//TODO change errno_ptr from const char* to tree
+                           unsigned int &errno_stored, std::list<tree> &errno_ptr)
 {
    //check if errno was stored or restored
    tree r_var = gimple_assign_rhs1 (stmt);
@@ -755,7 +755,7 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
       status.instr_list.push_back(new_instr);
    }
    //store or restore check
-   if (TREE_CODE (l_var) == VAR_DECL && TREE_CODE (r_var) == VAR_DECL)
+   if (TREE_CODE (l_var) == VAR_DECL && TREE_CODE (r_var) == VAR_DECL)//store errno from storage
    {
       if (is_var_in_list(r_var,obj.stored_errno))
       {
@@ -768,13 +768,12 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
          add_unique_to_list(l_var, obj.stored_errno);
       }
    }
-   else if (TREE_CODE (l_var) == MEM_REF)
+   else if (TREE_CODE (l_var) == MEM_REF)//restoring errno
    {
-      //get ID of mem_ref SSA_NAME variable(build in variable)
       l_var = TREE_OPERAND (l_var, 0);
       if (!l_var)
          return;
-      if(TREE_CODE (l_var) == SSA_NAME)
+      if(TREE_CODE (l_var) == SSA_NAME)//get ID of mem_ref SSA_NAME variable(build in variable)
       {
          if (errno_valid && errno_stored == SSA_NAME_VERSION (l_var))
          {
@@ -796,7 +795,7 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
             }
          } 
       }
-      else if (TREE_CODE (l_var) == VAR_DECL)
+      else if (TREE_CODE (l_var) == VAR_DECL)//using own reference to errno
       {
          if (is_var_in_list(l_var,errno_ptr))
          {
@@ -819,13 +818,12 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
          }
       }
    }
-   else if (TREE_CODE (r_var) == MEM_REF)
+   else if (TREE_CODE (r_var) == MEM_REF)//store errno
    {
-      //get ID of mem_ref SSA_NAME variable(build in variable)
       r_var = TREE_OPERAND (r_var, 0);
       if (!r_var)
          return;
-      if(TREE_CODE (r_var) == SSA_NAME)
+      if(TREE_CODE (r_var) == SSA_NAME)//get ID of mem_ref SSA_NAME variable(build in variable)
       {
          if (errno_valid)
          {
@@ -843,7 +841,7 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
             }
          }
       }
-      else if(TREE_CODE (r_var) == VAR_DECL)
+      else if(TREE_CODE (r_var) == VAR_DECL)//using own reference to errno
       {
          if (is_var_in_list(r_var,errno_ptr))
          {
@@ -897,6 +895,7 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
    {
       if (strcmp(get_name(obj.fnc_tree),name)==0)
       {
+         //check if it was already scaned
          if (handler_found != nullptr)
          {
             *handler_found=true;
@@ -949,6 +948,7 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
             }
          }
          all_ok=true;
+         //start the scan
          FOR_ALL_BB_FN(bb, obj.fun)
          {
             bb_data status;
@@ -993,6 +993,7 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
                }
             }
          }
+         //scan complete, start CFG analysis
          if (!obj.was_err)
          {
             analyze_CFG(obj);
@@ -1002,6 +1003,7 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
                print_errno_warning(obj.fnc_tree,obj.errno_loc);
             }
          }
+         //return value according the scan results
          if (obj.fatal)
             return_number=-1;
          else if (obj.not_safe)
@@ -1020,6 +1022,8 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
       }
    }
    call_tree.pop_back();
+   //if there are unsolved dependencies return_number is modified by +100
+   //dependencies will be solved later, when we have more informations
    if (!all_ok)
       return_number+=100;
    return return_number;
@@ -1139,7 +1143,7 @@ struct handler_check_pass : gimple_opt_pass
                handler=get_handler(stmt);
             else if (gimple_code(stmt)==GIMPLE_ASSIGN)
             {
-               //expand COMPONENT_REF into separated strings
+               //expand COMPONENT_REF into separated strings(assign to .sa_handler in some struct)
                if (TREE_CODE(gimple_assign_lhs(stmt))==COMPONENT_REF)
                {
                   tree node,op0,op1,op2;
@@ -1183,7 +1187,7 @@ struct handler_check_pass : gimple_opt_pass
                   }
                }
             }
-            if (handler!=nullptr)
+            if (handler!=nullptr)//handler found, add to list of handlers to scan
             {
                //std::cerr << "‘\033[1;1m signal handler " << get_name(handler) << " found \033[0m‘\n";
                //std::cerr << get_tree_code_name (TREE_CODE (handler)) << "\n";
@@ -1223,22 +1227,24 @@ struct handler_check_pass : gimple_opt_pass
       }
 
       //scan all identified signal handlers
-      while(!handlers.empty())
+      std::list<tree>::iterator it = handlers.begin();
+      std::list<tree>::iterator it_next=it;
+      while(it!=handlers.end())
       {
-         handler=handlers.front();
+         ++it_next;
+         handler=*it;
 
          if (handler != nullptr)
          {
             bool found=false;
             std::list<const char*> call_tree;
             scan_own_function(get_name(handler),call_tree,&found);
-            if (!found)
-               break;
-            else
-               handlers.pop_front();
+            if (found)
+               handlers.erase(it);
          }
          else
-            handlers.pop_front();
+            handlers.erase(it);
+         it=it_next;
       }
       //end handlers check
 
