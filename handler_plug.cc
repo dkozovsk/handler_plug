@@ -111,6 +111,8 @@ void handle_dependencies()
                all_solved=false;
             }
          }
+         if (obj.scaned && obj.depends.empty() && !obj.not_safe)
+            obj.is_ok=true;
          if (solved)
             nothing_solved=false;
       }
@@ -904,7 +906,7 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
                obj.was_err=true;
                print_errno_warning(obj.fnc_tree,obj.errno_loc);
             }
-            if (obj.is_handler &&  (obj.not_safe || obj.is_ok) )
+            if (obj.is_handler && obj.scaned)
                return return_number;
             obj.is_handler=true;
             if (obj.is_ok)
@@ -919,6 +921,8 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
                }
                break;
             }
+            if(obj.scaned)
+               return return_number;
          }
          else 
          {
@@ -933,16 +937,28 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
             }
             else if (obj.errno_changed)
             {
+               if (obj.is_ok)
+                  return_number=2;
+               else
+                  return_number=102;
                call_tree.pop_back();
-               return 2;
+               return return_number;
             }
             else if (obj.is_exit)
             {
+               if (obj.is_ok)
+                  return_number=4;
+               else
+                  return_number=104;
                call_tree.pop_back();
-               return 4;
+               return return_number;
             }
-            else if (obj.is_ok)
+            else if (obj.scaned)
             {
+               if (obj.is_ok)
+                  return_number=1;
+               else
+                  return_number=101;
                call_tree.pop_back();
                return return_number;
             }
@@ -1003,6 +1019,7 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
                print_errno_warning(obj.fnc_tree,obj.errno_loc);
             }
          }
+         obj.scaned=true;
          //return value according the scan results
          if (obj.fatal)
             return_number=-1;

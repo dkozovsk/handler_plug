@@ -82,6 +82,7 @@ struct bb_link {
 struct my_data {
     function* fun;
     tree fnc_tree;
+    bool scaned=false;
     bool is_handler=false;
     bool is_ok=false;
     bool not_safe=false;
