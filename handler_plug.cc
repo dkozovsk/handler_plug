@@ -17,7 +17,8 @@ static const errno_var pseudo_errno={
 };
 
 //bool operators for comparing errno_var 
-//others bool operators can be substituted using this two
+//others bool operators can be substituted using this two and negation
+//most necessary are == and !=(substituted as negation of ==)
 bool operator< (const errno_var &a, const errno_var &b)
 {
    if (!a.name)
@@ -38,7 +39,7 @@ bool operator== (const errno_var &a, const errno_var &b)
 }
 
 //scan functions which are defined after the scan of function, which called them
-void handle_dependencies()
+void handle_dependencies()//TODO unscaned function may be exit, don't analize until dependencies handled ?
 {
    bool all_solved=true;
    bool nothing_solved=false;
@@ -60,7 +61,7 @@ void handle_dependencies()
             int8_t return_number=scan_own_function(get_name(depends.fnc),call_tree,nullptr);
             if (return_number < 99)
             {
-               //if call of this function may change errno and there was no error again do CFG analysis
+               //if call of this function may change errno and there was no error, do CFG analysis again
                if (return_number == 2 && !obj.was_err)
                {
                   for (bb_data &block_data : obj.block_status)
@@ -166,6 +167,8 @@ bool equal_sets(std::set<errno_var> &a,std::set<errno_var> &b)
 {
    std::set<errno_var>::iterator it_a=a.begin();
    std::set<errno_var>::iterator it_b=b.begin();
+   //because sets are ordered, it is possible to compare
+   //first member with first, second with second and so on
    while(it_a != a.end() && it_b != b.end())
    {
       if(!(*it_a == *it_b))
@@ -173,6 +176,7 @@ bool equal_sets(std::set<errno_var> &a,std::set<errno_var> &b)
       ++it_a;
       ++it_b;
    }
+   //sets should contain same amount of members
    if(it_a != a.end() || it_b != b.end())
       return false;
    return true;
@@ -189,7 +193,7 @@ errno_var tree_to_errno_var(tree var)
    return new_var;
 }
 
-//compute output set from imput set for one basic block
+//compute output set from input set for one basic block
 bool compute_bb(bb_data &status, location_t &err_loc,bool &changed)
 {
    status.computed=true;
@@ -282,6 +286,7 @@ bool compute_bb(bb_data &status, location_t &err_loc,bool &changed)
             return false;
             break;
          case IC_DEPEND:
+            //this is only placeholder, may change later
             break;
          default:
             //this should never happen
