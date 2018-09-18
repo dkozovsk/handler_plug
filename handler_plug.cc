@@ -39,7 +39,7 @@ bool operator== (const errno_var &a, const errno_var &b)
 }
 
 //scan functions which are defined after the scan of function, which called them
-void handle_dependencies()//TODO unscaned function may be exit, don't analize until dependencies handled ?
+void handle_dependencies()
 {
    bool all_solved=true;
    bool nothing_solved=false;
@@ -62,7 +62,7 @@ void handle_dependencies()//TODO unscaned function may be exit, don't analize un
             if (return_number < 99)
             {
                //if call of this function may change errno and there was no error, do CFG analysis again
-               if (return_number == 2 && !obj.was_err)
+               if ((return_number == 2 || return_number == 4) && !obj.was_err)
                {
                   for (bb_data &block_data : obj.block_status)
                   {
@@ -75,19 +75,15 @@ void handle_dependencies()//TODO unscaned function may be exit, don't analize un
                         {
                            ++it;
                         }
-                        it->ic=IC_CHANGE_ERRNO;
+                        it->ic=return_number == 2 ? IC_CHANGE_ERRNO : IC_EXIT;
+                        if(!block_data.is_exit)
+                           block_data.is_exit=return_number == 4;
                         block_data.computed=false;
                         break;
                      }
                   }
-                  analyze_CFG(obj);
-                  if (obj.errno_changed && obj.is_handler)
-                  {
-                     obj.was_err =true;
-                     print_errno_warning(obj.fnc_tree,obj.errno_loc);
-                  }
                }
-               if (return_number <=0)
+               else if (return_number <=0)
                {
                   obj.not_safe=true;
                   if (!obj.fatal)
@@ -110,6 +106,15 @@ void handle_dependencies()//TODO unscaned function may be exit, don't analize un
                
                solved=false;
                all_solved=false;
+            }
+         }
+         if(solved && obj.scaned)
+         {
+            analyze_CFG(obj);
+            if (obj.errno_changed && obj.is_handler)
+            {
+               obj.was_err =true;
+               print_errno_warning(obj.fnc_tree,obj.errno_loc);
             }
          }
          if (obj.scaned && obj.depends.empty() && !obj.not_safe)
@@ -1019,7 +1024,7 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
             }
          }
          //scan complete, start CFG analysis
-         if (!obj.was_err)
+         if (!obj.was_err && obj.depends.empty())
          {
             analyze_CFG(obj);
             if (obj.is_handler && obj.errno_changed)
