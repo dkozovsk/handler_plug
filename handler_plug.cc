@@ -11,12 +11,12 @@ static bool added_new_setter=false;
 static const char * const plugin_name = "handler_plug";
 
 //this variable represents errno in the analysis
-static const errno_var pseudo_errno={ 
-   .id=0, 
+static const errno_var pseudo_errno={
+   .id=0,
    .name=nullptr
 };
 
-//bool operators for comparing errno_var 
+//bool operators for comparing errno_var
 //others bool operators can be substituted using this two and negation
 //most necessary are == and !=(substituted as negation of ==)
 bool operator< (const errno_var &a, const errno_var &b)
@@ -61,7 +61,7 @@ void handle_dependencies()
             int8_t return_number=scan_own_function(get_name(depends.fnc),call_tree,nullptr);
             if (return_number < 99)
             {
-               //if call of this function may change errno and there was no error, do CFG analysis again
+               //if call of this function may change errno or is exit function replace placeholder with corresponding instruction
                if ((return_number == 2 || return_number == 4) && !obj.was_err)
                {
                   for (bb_data &block_data : obj.block_status)
@@ -103,7 +103,7 @@ void handle_dependencies()
             }
             else
             {
-               
+
                solved=false;
                all_solved=false;
             }
@@ -262,7 +262,7 @@ bool compute_bb(bb_data &status, location_t &err_loc,bool &changed)
                it = new_set.find(tree_to_errno_var(instr.var));
                if (it!=new_set.end())
                {
-                  new_set.insert(pseudo_errno); 
+                  new_set.insert(pseudo_errno);
                }
                else
                {
@@ -562,7 +562,7 @@ tree give_me_handler(tree var,bool first)
 }
 
 //scan if the called function in signal handler is asynchronous-safe and if errno may be changed
-//returns 0 when function is not asynchronous-safe, 
+//returns 0 when function is not asynchronous-safe,
 //        1 if it is safe and errno is not changed,
 //        2 if it is safe, but errno may be changed,
 //        4 if it is safe exit function
@@ -666,17 +666,17 @@ void process_gimple_call(my_data &obj,bb_data &status,gimple * stmt, bool &all_o
             depend_data save_dependencies;
             save_dependencies.loc = gimple_location(stmt);
             save_dependencies.fnc = fn_decl;
-            
+
             //unscaned function, it can be found later, that it changes errno
             //(special instruction as placeholder for this change)
-            instruction new_instr; 
-            new_instr.ic=IC_DEPEND; 
-            new_instr.var=nullptr; 
+            instruction new_instr;
+            new_instr.ic=IC_DEPEND;
+            new_instr.var=nullptr;
             new_instr.instr_loc=gimple_location(stmt);
             status.instr_list.push_back(new_instr);
             save_dependencies.parent_instr_loc=status.instr_list.size();
             save_dependencies.parent_block_id=status.block_id;
-            
+
             all_ok=false;
             dependencies_handled=false;
             obj.depends.push_front(save_dependencies);
@@ -712,7 +712,7 @@ void process_gimple_call(my_data &obj,bb_data &status,gimple * stmt, bool &all_o
    {
       all_ok=false;
       obj.not_safe=true;
-      
+
       if (obj.is_handler)
          print_warning(obj.fnc_tree,fn_decl,gimple_location(stmt),return_number==-1);
       else
@@ -723,27 +723,27 @@ void process_gimple_call(my_data &obj,bb_data &status,gimple * stmt, bool &all_o
          new_err.err_fatal = return_number==-1;
          obj.err_log.push_back(new_err);
       }
-      
+
       if (return_number == -1)
          obj.fatal=true;
-      
+
       return;
    }
    //check if errno was not changed or exit was found
    else if (return_number == 2)
    {
-      instruction new_instr; 
-      new_instr.ic=IC_CHANGE_ERRNO; 
-      new_instr.var=nullptr; 
+      instruction new_instr;
+      new_instr.ic=IC_CHANGE_ERRNO;
+      new_instr.var=nullptr;
       new_instr.instr_loc=gimple_location(stmt);
       status.instr_list.push_back(new_instr);
    }
    else if (return_number == 4)
    {
       //status.exit_found=true;
-      instruction new_instr; 
-      new_instr.ic=IC_EXIT; 
-      new_instr.var=nullptr; 
+      instruction new_instr;
+      new_instr.ic=IC_EXIT;
+      new_instr.var=nullptr;
       new_instr.instr_loc=gimple_location(stmt);
       status.instr_list.push_back(new_instr);
       status.is_exit=true;
@@ -762,9 +762,9 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
    //(if you try to store to variable again, it will be represented as two instructions, first destroy, then store)
    if (TREE_CODE (l_var) == VAR_DECL && is_var_in_list(l_var,obj.stored_errno))
    {
-      instruction new_instr; 
+      instruction new_instr;
       new_instr.ic=IC_DESTROY_STORAGE;
-      new_instr.var=l_var; 
+      new_instr.var=l_var;
       new_instr.instr_loc=gimple_location(stmt);
       status.instr_list.push_back(new_instr);
    }
@@ -773,7 +773,7 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
    {
       if (is_var_in_list(r_var,obj.stored_errno))
       {
-         instruction new_instr; 
+         instruction new_instr;
          new_instr.ic=IC_SAVE_FROM_VAR;
          new_instr.var=l_var;
          new_instr.from_var=r_var;
@@ -793,21 +793,21 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
          {
             if (TREE_CODE (r_var) == VAR_DECL)
             {
-               instruction new_instr; 
-               new_instr.ic=IC_RESTORE_ERRNO; 
-               new_instr.var=r_var; 
+               instruction new_instr;
+               new_instr.ic=IC_RESTORE_ERRNO;
+               new_instr.var=r_var;
                new_instr.instr_loc=gimple_location(stmt);
                status.instr_list.push_back(new_instr);
             }
             else
             {
-               instruction new_instr; 
-               new_instr.ic=IC_CHANGE_ERRNO; 
-               new_instr.var=nullptr; 
+               instruction new_instr;
+               new_instr.ic=IC_CHANGE_ERRNO;
+               new_instr.var=nullptr;
                new_instr.instr_loc=gimple_location(stmt);
                status.instr_list.push_back(new_instr);
             }
-         } 
+         }
       }
       else if (TREE_CODE (l_var) == VAR_DECL)//using own reference to errno
       {
@@ -815,17 +815,17 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
          {
             if (TREE_CODE (r_var) == VAR_DECL)
             {
-               instruction new_instr; 
-               new_instr.ic=IC_RESTORE_ERRNO; 
-               new_instr.var=r_var; 
+               instruction new_instr;
+               new_instr.ic=IC_RESTORE_ERRNO;
+               new_instr.var=r_var;
                new_instr.instr_loc=gimple_location(stmt);
                status.instr_list.push_back(new_instr);
             }
             else
             {
-               instruction new_instr; 
-               new_instr.ic=IC_CHANGE_ERRNO; 
-               new_instr.var=nullptr; 
+               instruction new_instr;
+               new_instr.ic=IC_CHANGE_ERRNO;
+               new_instr.var=nullptr;
                new_instr.instr_loc=gimple_location(stmt);
                status.instr_list.push_back(new_instr);
             }
@@ -845,9 +845,9 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
             {
                if (TREE_CODE (l_var) == VAR_DECL)
                {
-                  instruction new_instr; 
-                  new_instr.ic=IC_SAVE_ERRNO; 
-                  new_instr.var=l_var; 
+                  instruction new_instr;
+                  new_instr.ic=IC_SAVE_ERRNO;
+                  new_instr.var=l_var;
                   new_instr.instr_loc=gimple_location(stmt);
                   status.instr_list.push_back(new_instr);
                   add_unique_to_list(l_var, obj.stored_errno);
@@ -861,9 +861,9 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
          {
             if (TREE_CODE (l_var) == VAR_DECL)
             {
-               instruction new_instr; 
-               new_instr.ic=IC_SAVE_ERRNO; 
-               new_instr.var=l_var; 
+               instruction new_instr;
+               new_instr.ic=IC_SAVE_ERRNO;
+               new_instr.var=l_var;
                new_instr.instr_loc=gimple_location(stmt);
                status.instr_list.push_back(new_instr);
                add_unique_to_list(l_var, obj.stored_errno);
@@ -877,7 +877,7 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
    name contains name of function, which should be scaned
    call_tree is list of nested calls of functions, it is necesery for recurse
    handler_found if this pointer is set, scaned function is handler and returns there, if handler was found or not
-   returns 0 when function is not asynchronous-safe, 
+   returns 0 when function is not asynchronous-safe,
            1 if it is safe and errno is not changed,
            2 if it is safe, but errno may be changed,
            4 if it is safe exit function
@@ -895,18 +895,18 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
       if (strcmp(name,fnc)==0)
          return 101;
       //this means that this function is ok, but wasn't scaned entirely
-      //(can't scan this function, because it undirectly depends on itself), 
+      //(can't scan this function, because it undirectly depends on itself),
       //function that called this function will depend on this function
       //this should be solved in handle_dependencies()
    }
    call_tree.push_back(name);
    basic_block bb;
    bool all_ok=false;
-   
+
    bool errno_valid=false;
    unsigned int errno_stored=0;
    std::list<tree> errno_ptr;
-   
+
    for (my_data &obj: fnc_list)
    {
       if (strcmp(get_name(obj.fnc_tree),name)==0)
@@ -938,7 +938,7 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
             if(obj.scaned)
                return return_number;
          }
-         else 
+         else
          {
             if (obj.not_safe)
             {
@@ -983,10 +983,10 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
          {
             bb_data status;
             status.block_id=bb->index;
-            
+
             status.input_set.insert(pseudo_errno);
             status.output_set.insert(pseudo_errno);
-            
+
             gimple_stmt_iterator gsi;
             for (gsi = gsi_start_bb (bb); !gsi_end_p (gsi); gsi_next (&gsi))
             {
@@ -997,12 +997,12 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
                {
                   if (gimple_predict_predictor (stmt)==PRED_TREE_EARLY_RETURN)
                   {
-                     instruction new_instr; 
-                     new_instr.ic=IC_RETURN; 
-                     new_instr.var=nullptr; 
+                     instruction new_instr;
+                     new_instr.ic=IC_RETURN;
+                     new_instr.var=nullptr;
                      new_instr.instr_loc=gimple_location(stmt);
                      status.instr_list.push_back(new_instr);
-                  }                  
+                  }
                }
                else if (!obj.was_err && gimple_code(stmt)==GIMPLE_ASSIGN)
                   process_gimple_assign(obj, status, stmt, errno_valid, errno_stored, errno_ptr);
@@ -1012,7 +1012,7 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
                obj.block_status.push_back(status);
                edge e;
                edge_iterator ei;
-          
+
                FOR_EACH_EDGE(e, ei, bb->succs)
                {
                  basic_block succ = e->dest;
@@ -1159,7 +1159,6 @@ struct handler_check_pass : gimple_opt_pass
       new_fnc.fun=fun;
       new_fnc.fnc_tree=current_function_decl;
       fnc_list.push_front(new_fnc);
-      //std::cerr << "in function " << get_name(new_fnc.fnc_tree) << "\n";
       //Start look for handlers
       FOR_ALL_BB_FN(bb, fun)
       {
@@ -1169,7 +1168,6 @@ struct handler_check_pass : gimple_opt_pass
          for (gsi = gsi_start_bb (bb); !gsi_end_p (gsi); gsi_next (&gsi))
          {
             gimple * stmt = gsi_stmt (gsi);
-            //print_gimple_stmt (stderr,stmt,0,0);
             if (gimple_code(stmt)==GIMPLE_CALL)
                handler=get_handler(stmt);
             else if (gimple_code(stmt)==GIMPLE_ASSIGN)
@@ -1220,15 +1218,13 @@ struct handler_check_pass : gimple_opt_pass
             }
             if (handler!=nullptr)//handler found, add to list of handlers to scan
             {
-               //std::cerr << "‘\033[1;1m signal handler " << get_name(handler) << " found \033[0m‘\n";
-               //std::cerr << get_tree_code_name (TREE_CODE (handler)) << "\n";
                handlers.push_front(handler);
                handler=nullptr;
             }
          }
       }
       //End look for handlers
-      
+
       //if new setter was found, check already checked functions with new setters
       while (added_new_setter)
       {
