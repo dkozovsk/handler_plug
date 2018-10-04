@@ -276,6 +276,10 @@ bool compute_bb(bb_data &status, location_t &err_loc,bool &changed)
                }
             }
             break;
+         case IC_SET_FROM_PARM:
+            {
+               break;
+            }
          case IC_RETURN:
             {
                std::set<errno_var>::iterator it;
@@ -318,6 +322,9 @@ bool compute_bb(bb_data &status, location_t &err_loc,bool &changed)
 
 //analyze CFG for one function
 void analyze_CFG(my_data &obj)
+//TODO atribute cleanup !! 
+//TODO stored errno in builtin(sometimes it happens)(struct required, something like errno ref in builtin var)
+//TODO function that assigns errno from parameter(errno setter ? check beforehead ?(better not, special return code))
 {
    //analyze if it is own exit function
    //that means that all predecessors of exit block must
@@ -751,7 +758,7 @@ void process_gimple_call(my_data &obj,bb_data &status,gimple * stmt, bool &all_o
 }
 
 void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &errno_valid,
-                           unsigned int &errno_stored, std::list<tree> &errno_ptr)
+                           unsigned int &errno_stored, errno_in_builtin &errno_builtin_storage, std::list<tree> &errno_ptr)
 {
    //check if errno was stored or restored
    tree r_var = gimple_assign_rhs1 (stmt);
@@ -787,7 +794,7 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
       l_var = TREE_OPERAND (l_var, 0);
       if (!l_var)
          return;
-      if(TREE_CODE (l_var) == SSA_NAME)//get ID of mem_ref SSA_NAME variable(build in variable)
+      if(TREE_CODE (l_var) == SSA_NAME)//get ID of mem_ref SSA_NAME variable(built in variable)
       {
          if (errno_valid && errno_stored == SSA_NAME_VERSION (l_var))
          {
@@ -798,6 +805,18 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
                new_instr.var=r_var;
                new_instr.instr_loc=gimple_location(stmt);
                status.instr_list.push_back(new_instr);
+            }
+            else if (TREE_CODE (r_var) == SSA_NAME && errno_builtin_storage.valid 
+                     && errno_builtin_storage.id == SSA_NAME_VERSION (r_var))
+            {
+               if (errno_builtin_storage.var && TREE_CODE(errno_builtin_storage.var)==PARM_DECL)
+               {
+                  instruction new_instr;
+                  new_instr.ic=IC_SET_FROM_PARM;
+                  new_instr.var=errno_builtin_storage.var;
+                  new_instr.instr_loc=gimple_location(stmt);
+                  status.instr_list.push_back(new_instr);
+               }
             }
             else
             {
@@ -821,6 +840,11 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
                new_instr.instr_loc=gimple_location(stmt);
                status.instr_list.push_back(new_instr);
             }
+            else if (TREE_CODE (r_var) == SSA_NAME && errno_builtin_storage.valid 
+                     && errno_builtin_storage.id == SSA_NAME_VERSION (r_var))
+            {
+               ;//TODO
+            }
             else
             {
                instruction new_instr;
@@ -837,7 +861,7 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
       r_var = TREE_OPERAND (r_var, 0);
       if (!r_var)
          return;
-      if(TREE_CODE (r_var) == SSA_NAME)//get ID of mem_ref SSA_NAME variable(build in variable)
+      if(TREE_CODE (r_var) == SSA_NAME)//get ID of mem_ref SSA_NAME variable(built in variable)
       {
          if (errno_valid)
          {
@@ -851,6 +875,11 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
                   new_instr.instr_loc=gimple_location(stmt);
                   status.instr_list.push_back(new_instr);
                   add_unique_to_list(l_var, obj.stored_errno);
+               }
+               else if (TREE_CODE (l_var) == SSA_NAME)
+               {
+                  errno_builtin_storage.valid=true;
+                  errno_builtin_storage.id=SSA_NAME_VERSION (l_var);
                }
             }
          }
@@ -868,7 +897,34 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
                status.instr_list.push_back(new_instr);
                add_unique_to_list(l_var, obj.stored_errno);
             }
+            else if (TREE_CODE (l_var) == SSA_NAME)
+            {
+               errno_builtin_storage.valid=true;
+               errno_builtin_storage.id=SSA_NAME_VERSION (l_var);
+            }
          }
+      }
+      else if (TREE_CODE (r_var) == PARM_DECL)
+      {
+         if (TREE_CODE (l_var) == SSA_NAME)
+         {
+            errno_builtin_storage.var=r_var;
+            errno_builtin_storage.valid=true;
+            errno_builtin_storage.id=SSA_NAME_VERSION (l_var);
+         }
+      }
+   }
+   else if (TREE_CODE (r_var) == SSA_NAME && errno_builtin_storage.valid 
+            && errno_builtin_storage.id == SSA_NAME_VERSION (r_var))
+   {
+      if (TREE_CODE (l_var) == VAR_DECL && errno_builtin_storage.var==nullptr)
+      {
+         instruction new_instr;
+         new_instr.ic=IC_SAVE_ERRNO;
+         new_instr.var=l_var;
+         new_instr.instr_loc=gimple_location(stmt);
+         status.instr_list.push_back(new_instr);
+         add_unique_to_list(l_var, obj.stored_errno);
       }
    }
 }
@@ -905,6 +961,7 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
 
    bool errno_valid=false;
    unsigned int errno_stored=0;
+   errno_in_builtin errno_builtin_storage;
    std::list<tree> errno_ptr;
 
    for (my_data &obj: fnc_list)
@@ -991,6 +1048,7 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
             for (gsi = gsi_start_bb (bb); !gsi_end_p (gsi); gsi_next (&gsi))
             {
                gimple * stmt = gsi_stmt (gsi);
+               //print_gimple_stmt (stderr,stmt,0,0);
                if (gimple_code(stmt)==GIMPLE_CALL)
                   process_gimple_call(obj, status, stmt, all_ok, call_tree, errno_valid, errno_stored, errno_ptr);
                else if (!obj.was_err && gimple_code(stmt)==GIMPLE_PREDICT)
@@ -1005,7 +1063,7 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
                   }
                }
                else if (!obj.was_err && gimple_code(stmt)==GIMPLE_ASSIGN)
-                  process_gimple_assign(obj, status, stmt, errno_valid, errno_stored, errno_ptr);
+                  process_gimple_assign(obj, status, stmt, errno_valid, errno_stored, errno_builtin_storage, errno_ptr);
             }
             if (!obj.was_err)
             {

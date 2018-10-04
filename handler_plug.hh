@@ -22,6 +22,7 @@ enum instruction_code {
 	IC_SAVE_FROM_VAR,
 	IC_DESTROY_STORAGE,
 	IC_RESTORE_ERRNO,
+   IC_SET_FROM_PARM,
 	IC_RETURN,
 	IC_EXIT,
 	IC_DEPEND
@@ -62,6 +63,13 @@ struct remember_error {
 struct errno_var {
 	unsigned int id;
 	const char *name;
+};
+
+//TODO better name
+struct errno_in_builtin {
+   tree var=nullptr;
+   unsigned int id;
+   bool valid=false;
 };
 
 struct bb_data {
@@ -106,7 +114,7 @@ bool is_handler_wrong_fnc(const char* name);
 void process_gimple_call(my_data &obj,bb_data &status,gimple * stmt, bool &all_ok, std::list<const char*> &call_tree,
                            bool &errno_valid, unsigned int &errno_stored, std::list<const char*> &errno_ptr);
 void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &errno_valid,
-                           unsigned int &errno_stored, std::list<const char*> &errno_ptr);
+                           unsigned int &errno_stored, errno_in_builtin &errno_builtin_storage, std::list<const char*> &errno_ptr);
 int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,bool *handler_found);
 tree give_me_handler(tree var,bool first);
 tree scan_own_handler_setter(gimple* stmt, tree fun_decl);
