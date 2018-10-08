@@ -32,6 +32,7 @@ struct instruction {
 	instruction_code ic;
 	tree var=nullptr;
 	tree from_var=nullptr;
+   unsigned int param_pos=0;
 	location_t instr_loc;
 };
 
@@ -39,6 +40,7 @@ struct instruction {
 struct depend_data {
   tree fnc;
   location_t loc;
+  gimple * stmt;
   unsigned int parent_block_id;
   unsigned int parent_instr_loc;
 };
@@ -49,7 +51,7 @@ struct handler_in_var {
     tree handler;
 };
 
-struct handler_setter {
+struct setter_function {
     const char* setter;
     unsigned int position;
 };
@@ -97,6 +99,7 @@ struct my_data {
     bool was_err=false;
     bool fatal=false; 
     bool is_exit=false;
+    bool is_errno_setter=false;
     std::list<remember_error> err_log;
     std::list<depend_data> depends;
     
@@ -116,11 +119,12 @@ void process_gimple_call(my_data &obj,bb_data &status,gimple * stmt, bool &all_o
 void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &errno_valid,
                            unsigned int &errno_stored, errno_in_builtin &errno_builtin_storage, std::list<const char*> &errno_ptr);
 int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,bool *handler_found);
+tree get_var_from_setter_stmt (gimple*stmt);
 tree give_me_handler(tree var,bool first);
 tree scan_own_handler_setter(gimple* stmt, tree fun_decl);
 //CFG analisys
 void analyze_CFG(my_data &obj);
-bool compute_bb(bb_data &status, location_t &err_loc,bool &changed);
+bool compute_bb(bb_data &status, location_t &err_loc,bool &changed,my_data &obj);
 void intersection(std::set<errno_var> &destination,std::set<errno_var> &source);
 bool equal_sets(std::set<errno_var> &a,std::set<errno_var> &b);
 errno_var tree_to_errno_var(tree var);

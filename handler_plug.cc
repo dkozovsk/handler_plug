@@ -3,7 +3,8 @@
 static std::list<my_data> fnc_list;
 static std::list<tree> handlers;
 static std::list<handler_in_var> possible_handlers;
-static std::list<handler_setter> own_setters;
+static std::list<setter_function> own_setters;
+static std::list<setter_function> errno_setters;
 
 static bool dependencies_handled=true;
 static bool added_new_setter=false;
@@ -62,7 +63,7 @@ void handle_dependencies()
             if (return_number < 99)
             {
                //if call of this function may change errno or is exit function replace placeholder with corresponding instruction
-               if ((return_number == 2 || return_number == 4) && !obj.was_err)
+               if ((return_number == 2 || return_number == 4 || return_number == 8) && !obj.was_err)
                {
                   for (bb_data &block_data : obj.block_status)
                   {
@@ -75,7 +76,13 @@ void handle_dependencies()
                         {
                            ++it;
                         }
-                        it->ic=return_number == 2 ? IC_CHANGE_ERRNO : IC_EXIT;
+                        if (return_number == 8)
+                        {
+                           if((it->var=get_var_from_setter_stmt (depends.stmt)))
+                              it->ic=IC_RESTORE_ERRNO;
+                        }
+                        else
+                           it->ic=return_number == 2 ? IC_CHANGE_ERRNO : IC_EXIT;
                         if(!block_data.is_exit)
                            block_data.is_exit=return_number == 4;
                         block_data.computed=false;
@@ -165,6 +172,19 @@ void intersection(std::set<errno_var> &destination,std::set<errno_var> &source)
          destination.erase(actual);
       }
    }
+   it=destination.find(pseudo_errno);
+   if(it!=destination.end())
+   {
+      std::set<errno_var>::iterator it_source=source.find(pseudo_errno);
+      if(it_source!=source.end())
+      {
+         if(it->id!=it_source->id)
+         {
+            destination.erase(it);
+            destination.insert(pseudo_errno);
+         }
+      }
+   }
 }
 
 //returns true if two sets are equal
@@ -176,6 +196,11 @@ bool equal_sets(std::set<errno_var> &a,std::set<errno_var> &b)
    //first member with first, second with second and so on
    while(it_a != a.end() && it_b != b.end())
    {
+      if (*it_a == pseudo_errno)
+      {
+         if(it_a->id != it_b->id)
+            break;
+      }
       if(!(*it_a == *it_b))
          break;
       ++it_a;
@@ -199,7 +224,7 @@ errno_var tree_to_errno_var(tree var)
 }
 
 //compute output set from input set for one basic block
-bool compute_bb(bb_data &status, location_t &err_loc,bool &changed)
+bool compute_bb(bb_data &status, location_t &err_loc,bool &changed,my_data &obj)
 {
    status.computed=true;
    std::set<errno_var> new_set=status.input_set;
@@ -278,6 +303,16 @@ bool compute_bb(bb_data &status, location_t &err_loc,bool &changed)
             break;
          case IC_SET_FROM_PARM:
             {
+               errno_var new_var;
+               new_var.name=nullptr;
+               new_var.id=instr.param_pos+1;
+               std::set<errno_var>::iterator it;
+               it = new_set.find(pseudo_errno);
+               if (it!=new_set.end())
+               {
+                  new_set.erase(it);
+               }
+               new_set.insert(new_var);
                break;
             }
          case IC_RETURN:
@@ -287,6 +322,10 @@ bool compute_bb(bb_data &status, location_t &err_loc,bool &changed)
                if (it==new_set.end())
                {
                   return true;
+               }
+               if(it->id!=0)
+               {
+                  ;//TODO
                }
                return false;
             }
@@ -309,6 +348,14 @@ bool compute_bb(bb_data &status, location_t &err_loc,bool &changed)
       if (it==new_set.end())
       {
          return true;
+      }
+      if(it->id!=0)
+      {
+         obj.is_errno_setter=true;
+         setter_function new_setter;
+         new_setter.setter=get_name(obj.fnc_tree);
+         new_setter.position=it->id-1;
+         errno_setters.push_back(new_setter);
       }
       return false;
    }
@@ -383,7 +430,7 @@ void analyze_CFG(my_data &obj)
             continue;
          if (!empty)
             status.input_set=new_set;
-         if (compute_bb(status,err_loc,changed))
+         if (compute_bb(status,err_loc,changed,obj))
          {
             obj.errno_loc=err_loc;
             obj.errno_changed=true;
@@ -396,7 +443,7 @@ void analyze_CFG(my_data &obj)
 //returns true if fnc is already a setter
 bool is_setter(tree fnc)
 {
-   for (handler_setter &obj: own_setters)
+   for (setter_function &obj: own_setters)
    {
       if (strcmp(obj.setter,get_name(fnc)) == 0)
       {
@@ -404,6 +451,38 @@ bool is_setter(tree fnc)
       }
    }
    return false;
+}
+
+tree get_var_from_setter_stmt (gimple*stmt)
+{
+   if (gimple_code(stmt)==GIMPLE_CALL)
+   {
+      for (setter_function &obj: errno_setters)
+      {
+         tree current_fn = gimple_call_fn(stmt);
+         if (!current_fn)
+            return nullptr;
+         const char* name = get_name(current_fn);
+         if (!name)
+            return nullptr;
+         if (strcmp(name,obj.setter)==0)
+         {
+            tree var = gimple_call_arg (stmt, obj.position);
+            if (!var)
+               break;
+            //std::cerr << get_tree_code_name (TREE_CODE (var)) << "\n";
+            if (TREE_CODE (var) == ADDR_EXPR)
+            {
+               var = TREE_OPERAND (var, 0);
+               if (!var || TREE_CODE (var) != VAR_DECL)
+                  break;
+               return var;
+            }
+            break;
+         }
+      }
+   }
+   return nullptr;
 }
 
 //get tree of handler from call stmt
@@ -437,7 +516,7 @@ tree get_handler(gimple* stmt)
                {
                   if (strcmp(get_name(argument),get_name(var_handler.handler))==0)
                   {
-                     handler_setter new_setter;
+                     setter_function new_setter;
                      new_setter.setter = get_name(current_function_decl);
                      new_setter.position = counter;
                      own_setters.push_front(new_setter);
@@ -479,7 +558,7 @@ tree get_handler(gimple* stmt)
          {
             if (strcmp(get_name(argument),get_name(var))==0)
             {
-               handler_setter new_setter;
+               setter_function new_setter;
                new_setter.setter = get_name(current_function_decl);
                new_setter.position = counter;
                own_setters.push_front(new_setter);
@@ -498,7 +577,7 @@ tree get_handler(gimple* stmt)
 //look through own setters, try to find handler if own setter was called
 tree scan_own_handler_setter(gimple* stmt,tree fun_decl)
 {
-   for (handler_setter &obj: own_setters)
+   for (setter_function &obj: own_setters)
    {
       tree current_fn = gimple_call_fn(stmt);
       if (!current_fn)
@@ -522,7 +601,7 @@ tree scan_own_handler_setter(gimple* stmt,tree fun_decl)
                   {
                      break;
                   }
-                  handler_setter new_setter;
+                  setter_function new_setter;
                   new_setter.setter = get_name(fun_decl);
                   new_setter.position = counter;
                   own_setters.push_front(new_setter);
@@ -673,6 +752,7 @@ void process_gimple_call(my_data &obj,bb_data &status,gimple * stmt, bool &all_o
             depend_data save_dependencies;
             save_dependencies.loc = gimple_location(stmt);
             save_dependencies.fnc = fn_decl;
+            save_dependencies.stmt=stmt;
 
             //unscaned function, it can be found later, that it changes errno
             //(special instruction as placeholder for this change)
@@ -755,6 +835,10 @@ void process_gimple_call(my_data &obj,bb_data &status,gimple * stmt, bool &all_o
       status.instr_list.push_back(new_instr);
       status.is_exit=true;
    }
+   else if (return_number == 8)
+   {
+      ;//TODO
+   }
 }
 
 void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &errno_valid,
@@ -811,11 +895,21 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
             {
                if (errno_builtin_storage.var && TREE_CODE(errno_builtin_storage.var)==PARM_DECL)
                {
-                  instruction new_instr;
-                  new_instr.ic=IC_SET_FROM_PARM;
-                  new_instr.var=errno_builtin_storage.var;
-                  new_instr.instr_loc=gimple_location(stmt);
-                  status.instr_list.push_back(new_instr);
+                  unsigned counter=0;
+                  for (tree argument = DECL_ARGUMENTS (obj.fnc_tree) ; argument ; argument = TREE_CHAIN (argument))
+                  {
+                     if (strcmp(get_name(argument),get_name(errno_builtin_storage.var))==0)
+                     {
+                        instruction new_instr;
+                        new_instr.ic=IC_SET_FROM_PARM;
+                        new_instr.var=errno_builtin_storage.var;
+                        new_instr.param_pos=counter;
+                        new_instr.instr_loc=gimple_location(stmt);
+                        status.instr_list.push_back(new_instr);
+                        break;
+                     }
+                     ++counter;
+                  }
                }
             }
             else
@@ -937,6 +1031,7 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
            1 if it is safe and errno is not changed,
            2 if it is safe, but errno may be changed,
            4 if it is safe exit function
+           8 if it is errno setter
           -1 if it is asynchronous-unsafe
            this codes + 100 if it has unsolved dependencies (0 and -1 excluded)
 */
@@ -1024,6 +1119,15 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
                call_tree.pop_back();
                return return_number;
             }
+            else if (obj.is_errno_setter)
+            {
+               if (obj.is_ok)
+                  return_number=8;
+               else
+                  return_number=108;
+               call_tree.pop_back();
+               return return_number;
+            }
             else if (obj.scaned)
             {
                if (obj.is_ok)
@@ -1101,6 +1205,8 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
             return_number=2;
          else if (obj.is_exit)
             return_number=4;
+         else if (obj.is_errno_setter)
+            return_number=8;
          if (return_number<=0)
          {
             call_tree.pop_back();
