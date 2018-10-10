@@ -23,7 +23,6 @@ enum instruction_code {
 	IC_DESTROY_STORAGE,
 	IC_RESTORE_ERRNO,
    IC_SET_FROM_PARM,
-	IC_RETURN,
 	IC_EXIT,
 	IC_DEPEND
 };
@@ -99,6 +98,7 @@ struct my_data {
     bool was_err=false;
     bool fatal=false; 
     bool is_exit=false;
+    bool can_be_setter=true;
     bool is_errno_setter=false;
     std::list<remember_error> err_log;
     std::list<depend_data> depends;
@@ -121,6 +121,12 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
 int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,bool *handler_found);
 tree get_var_from_setter_stmt (gimple*stmt);
 tree give_me_handler(tree var,bool first);
+//setter list
+bool is_setter(tree fnc, std::list<setter_function> &setter_list);
+//errno setter list
+bool has_same_param(setter_function &setter);
+void remove_errno_setter(setter_function &setter);
+//handler setter list
 tree scan_own_handler_setter(gimple* stmt, tree fun_decl);
 //CFG analisys
 void analyze_CFG(my_data &obj);

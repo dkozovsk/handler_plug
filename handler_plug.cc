@@ -315,21 +315,6 @@ bool compute_bb(bb_data &status, location_t &err_loc,bool &changed,my_data &obj)
                new_set.insert(new_var);
                break;
             }
-         case IC_RETURN:
-            {
-               std::set<errno_var>::iterator it;
-               it = new_set.find(pseudo_errno);
-               if (it==new_set.end())
-               {
-                  return true;
-               }
-               if(it->id!=0)
-               {
-                  ;//TODO
-               }
-               return false;
-            }
-            break;
          case IC_EXIT:
             return false;
             break;
@@ -349,13 +334,29 @@ bool compute_bb(bb_data &status, location_t &err_loc,bool &changed,my_data &obj)
       {
          return true;
       }
-      if(it->id!=0)
+      if(it->id!=0 && obj.can_be_setter)
       {
          obj.is_errno_setter=true;
          setter_function new_setter;
          new_setter.setter=get_name(obj.fnc_tree);
          new_setter.position=it->id-1;
-         errno_setters.push_back(new_setter);
+         if (!is_setter(obj.fnc_tree, errno_setters))
+            errno_setters.push_back(new_setter);
+         else
+         {
+            if(!has_same_param(new_setter))
+            {
+               obj.can_be_setter=false;
+               remove_errno_setter(new_setter);
+            }
+         }
+      }
+      else if (obj.can_be_setter)
+      {
+         setter_function new_setter;
+         new_setter.setter=get_name(obj.fnc_tree);
+         obj.can_be_setter=false;
+         remove_errno_setter(new_setter);
       }
       return false;
    }
@@ -417,7 +418,7 @@ void analyze_CFG(my_data &obj)
                         empty=false;
                         new_set=block_data.output_set;
                      }
-                     else
+                     else if (block_data.computed)
                      {
                         intersection(new_set,block_data.output_set);
                      }
@@ -441,9 +442,9 @@ void analyze_CFG(my_data &obj)
 }
 
 //returns true if fnc is already a setter
-bool is_setter(tree fnc)
+bool is_setter(tree fnc, std::list<setter_function> &setter_list)
 {
-   for (setter_function &obj: own_setters)
+   for (setter_function &obj: setter_list)
    {
       if (strcmp(obj.setter,get_name(fnc)) == 0)
       {
@@ -451,6 +452,33 @@ bool is_setter(tree fnc)
       }
    }
    return false;
+}
+
+bool has_same_param(setter_function &setter)
+{
+   for (setter_function &obj: errno_setters)
+   {
+      if (strcmp(obj.setter,setter.setter) == 0)
+      {
+         if (obj.position==setter.position)
+            return true;
+         return false;
+      }
+   }
+   return false;
+}
+
+void remove_errno_setter(setter_function &setter)
+{
+   std::list<setter_function>::iterator it;
+   for(it = errno_setters.begin(); it != errno_setters.end(); ++it)
+   {
+      if (strcmp(it->setter,setter.setter) == 0)
+      {
+         errno_setters.erase(it);
+         return;
+      }
+   }
 }
 
 tree get_var_from_setter_stmt (gimple*stmt)
@@ -597,7 +625,7 @@ tree scan_own_handler_setter(gimple* stmt,tree fun_decl)
             {
                if (strcmp(get_name(argument),get_name(var))==0)
                {
-                  if (is_setter(fun_decl))
+                  if (is_setter(fun_decl,own_setters))
                   {
                      break;
                   }
@@ -837,7 +865,11 @@ void process_gimple_call(my_data &obj,bb_data &status,gimple * stmt, bool &all_o
    }
    else if (return_number == 8)
    {
-      ;//TODO
+      instruction new_instr;
+      new_instr.ic=IC_RESTORE_ERRNO;
+      new_instr.instr_loc=gimple_location(stmt);
+      if((new_instr.var=get_var_from_setter_stmt (stmt)))
+         status.instr_list.push_back(new_instr);
    }
 }
 
@@ -937,7 +969,24 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
             else if (TREE_CODE (r_var) == SSA_NAME && errno_builtin_storage.valid 
                      && errno_builtin_storage.id == SSA_NAME_VERSION (r_var))
             {
-               ;//TODO
+               if (errno_builtin_storage.var && TREE_CODE(errno_builtin_storage.var)==PARM_DECL)
+               {
+                  unsigned counter=0;
+                  for (tree argument = DECL_ARGUMENTS (obj.fnc_tree) ; argument ; argument = TREE_CHAIN (argument))
+                  {
+                     if (strcmp(get_name(argument),get_name(errno_builtin_storage.var))==0)
+                     {
+                        instruction new_instr;
+                        new_instr.ic=IC_SET_FROM_PARM;
+                        new_instr.var=errno_builtin_storage.var;
+                        new_instr.param_pos=counter;
+                        new_instr.instr_loc=gimple_location(stmt);
+                        status.instr_list.push_back(new_instr);
+                        break;
+                     }
+                     ++counter;
+                  }
+               }
             }
             else
             {
@@ -1155,17 +1204,6 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
                //print_gimple_stmt (stderr,stmt,0,0);
                if (gimple_code(stmt)==GIMPLE_CALL)
                   process_gimple_call(obj, status, stmt, all_ok, call_tree, errno_valid, errno_stored, errno_ptr);
-               else if (!obj.was_err && gimple_code(stmt)==GIMPLE_PREDICT)
-               {
-                  if (gimple_predict_predictor (stmt)==PRED_TREE_EARLY_RETURN)
-                  {
-                     instruction new_instr;
-                     new_instr.ic=IC_RETURN;
-                     new_instr.var=nullptr;
-                     new_instr.instr_loc=gimple_location(stmt);
-                     status.instr_list.push_back(new_instr);
-                  }
-               }
                else if (!obj.was_err && gimple_code(stmt)==GIMPLE_ASSIGN)
                   process_gimple_assign(obj, status, stmt, errno_valid, errno_stored, errno_builtin_storage, errno_ptr);
             }
