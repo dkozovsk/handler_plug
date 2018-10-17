@@ -413,7 +413,7 @@ void analyze_CFG(my_data &obj)
                {
                   if(link.predecessor==block_data.block_id)
                   {
-                     if(empty)
+                     if(empty && block_data.computed)
                      {
                         empty=false;
                         new_set=block_data.output_set;
