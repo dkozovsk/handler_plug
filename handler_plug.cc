@@ -63,7 +63,7 @@ void handle_dependencies()
             if (return_number < 99)
             {
                //if call of this function may change errno or is exit function replace placeholder with corresponding instruction
-               if ((return_number == 2 || return_number == 4 || return_number == 8) && !obj.was_err)
+               if ((return_number == RC_ERRNO_CHANGED || return_number == RC_SAFE_EXIT || return_number == RC_ERRNO_SETTER) && !obj.was_err)
                {
                   for (bb_data &block_data : obj.block_status)
                   {
@@ -76,33 +76,33 @@ void handle_dependencies()
                         {
                            ++it;
                         }
-                        if (return_number == 8)
+                        if (return_number == RC_ERRNO_SETTER)
                         {
                            if((it->var=get_var_from_setter_stmt (depends.stmt)))
                               it->ic=IC_RESTORE_ERRNO;
                         }
                         else
-                           it->ic=return_number == 2 ? IC_CHANGE_ERRNO : IC_EXIT;
+                           it->ic=return_number == RC_ERRNO_CHANGED ? IC_CHANGE_ERRNO : IC_EXIT;
                         if(!block_data.is_exit)
-                           block_data.is_exit=return_number == 4;
+                           block_data.is_exit=return_number == RC_SAFE_EXIT;
                         block_data.computed=false;
                         break;
                      }
                   }
                }
-               else if (return_number <=0)
+               else if (return_number == RC_NOT_ASYNCH_SAFE || return_number == RC_ASYNCH_UNSAFE)
                {
                   obj.not_safe=true;
                   if (!obj.fatal)
-                     obj.fatal=return_number==-1;
+                     obj.fatal=return_number==RC_ASYNCH_UNSAFE;
                   if (obj.is_handler)
-                     print_warning(obj.fnc_tree,depends.fnc,depends.loc,return_number==-1);
+                     print_warning(obj.fnc_tree,depends.fnc,depends.loc,return_number==RC_ASYNCH_UNSAFE);
                   else
                   {
                      remember_error new_err;
                      new_err.err_loc = depends.loc;
                      new_err.err_fnc = depends.fnc;
-                     new_err.err_fatal = return_number==-1;
+                     new_err.err_fatal = return_number==RC_ASYNCH_UNSAFE;
                      obj.err_log.push_back(new_err);
                   }
                }
@@ -224,6 +224,7 @@ errno_var tree_to_errno_var(tree var)
 }
 
 //compute output set from input set for one basic block
+//returns true, if errno is changed and computed block is return from the function, false otherwise
 bool compute_bb(bb_data &status, location_t &err_loc,bool &changed,my_data &obj)
 {
    status.computed=true;
@@ -370,9 +371,6 @@ bool compute_bb(bb_data &status, location_t &err_loc,bool &changed,my_data &obj)
 
 //analyze CFG for one function
 void analyze_CFG(my_data &obj)
-//TODO atribute cleanup !! 
-//TODO stored errno in builtin(sometimes it happens)(struct required, something like errno ref in builtin var)
-//TODO function that assigns errno from parameter(errno setter ? check beforehead ?(better not, special return code))
 {
    //analyze if it is own exit function
    //that means that all predecessors of exit block must
@@ -454,6 +452,7 @@ bool is_setter(tree fnc, std::list<setter_function> &setter_list)
    return false;
 }
 
+//one function cant set errno from two different parameters
 bool has_same_param(setter_function &setter)
 {
    for (setter_function &obj: errno_setters)
@@ -468,6 +467,7 @@ bool has_same_param(setter_function &setter)
    return false;
 }
 
+//remove setter from errno_setters list
 void remove_errno_setter(setter_function &setter)
 {
    std::list<setter_function>::iterator it;
@@ -481,6 +481,7 @@ void remove_errno_setter(setter_function &setter)
    }
 }
 
+//this function returns variable, which is assigned to errno in errno setter function
 tree get_var_from_setter_stmt (gimple*stmt)
 {
    if (gimple_code(stmt)==GIMPLE_CALL)
@@ -711,19 +712,19 @@ int8_t is_handler_ok_fnc (const char* name)
    for(unsigned i=0;i<(sizeof(safe_exit_fnc)/sizeof(char*));++i)
    {
       if(strcmp(safe_exit_fnc[i],name)==0)
-         return 4;
+         return RC_SAFE_EXIT;
    }
    for(unsigned i=0;i<(sizeof(safe_fnc)/sizeof(char*));++i)
    {
       if(strcmp(safe_fnc[i],name)==0)
-         return 1;
+         return RC_ASYNCH_SAFE;
    }
    for(unsigned i=0;i<(sizeof(change_errno_fnc)/sizeof(char*));++i)
    {
       if(strcmp(change_errno_fnc[i],name)==0)
-         return 2;
+         return RC_ERRNO_CHANGED;
    }
-   return is_handler_wrong_fnc(name) ? -1 : 0;
+   return is_handler_wrong_fnc(name) ? RC_ASYNCH_UNSAFE : RC_NOT_ASYNCH_SAFE;
 }
 
 //scan if the called function in signal handler is asynchronous-unsafe
@@ -757,6 +758,7 @@ bool is_handler_wrong_fnc(const char* name)
    return false;
 }
 
+//proccess gimple call statement inside scan own function
 void process_gimple_call(my_data &obj,bb_data &status,gimple * stmt, bool &all_ok, std::list<const char*> &call_tree,
                            bool &errno_valid, unsigned int &errno_stored, std::list<tree> &errno_ptr)
 {
@@ -766,7 +768,7 @@ void process_gimple_call(my_data &obj,bb_data &status,gimple * stmt, bool &all_o
    const char* called_function_name = get_name(fn_decl);
    if (!called_function_name)
       return;
-   int8_t return_number = 1;
+   int8_t return_number = RC_ASYNCH_SAFE;
    if (DECL_INITIAL  (fn_decl))
    {
       // in case of recurse, do nothing
@@ -823,29 +825,29 @@ void process_gimple_call(my_data &obj,bb_data &status,gimple * stmt, bool &all_o
       }
    }
    //check for wrong function
-   if (return_number <= 0)
+   if (return_number == RC_NOT_ASYNCH_SAFE || return_number == RC_ASYNCH_UNSAFE)
    {
       all_ok=false;
       obj.not_safe=true;
 
       if (obj.is_handler)
-         print_warning(obj.fnc_tree,fn_decl,gimple_location(stmt),return_number==-1);
+         print_warning(obj.fnc_tree,fn_decl,gimple_location(stmt),return_number==RC_ASYNCH_UNSAFE);
       else
       {
          remember_error new_err;
          new_err.err_loc = gimple_location(stmt);
          new_err.err_fnc = fn_decl;
-         new_err.err_fatal = return_number==-1;
+         new_err.err_fatal = return_number==RC_ASYNCH_UNSAFE;
          obj.err_log.push_back(new_err);
       }
 
-      if (return_number == -1)
+      if (return_number == RC_ASYNCH_UNSAFE)
          obj.fatal=true;
 
       return;
    }
    //check if errno was not changed or exit was found
-   else if (return_number == 2)
+   else if (return_number == RC_ERRNO_CHANGED)
    {
       instruction new_instr;
       new_instr.ic=IC_CHANGE_ERRNO;
@@ -853,7 +855,7 @@ void process_gimple_call(my_data &obj,bb_data &status,gimple * stmt, bool &all_o
       new_instr.instr_loc=gimple_location(stmt);
       status.instr_list.push_back(new_instr);
    }
-   else if (return_number == 4)
+   else if (return_number == RC_SAFE_EXIT)
    {
       //status.exit_found=true;
       instruction new_instr;
@@ -863,7 +865,8 @@ void process_gimple_call(my_data &obj,bb_data &status,gimple * stmt, bool &all_o
       status.instr_list.push_back(new_instr);
       status.is_exit=true;
    }
-   else if (return_number == 8)
+   //check for errno setter
+   else if (return_number == RC_ERRNO_SETTER)
    {
       instruction new_instr;
       new_instr.ic=IC_RESTORE_ERRNO;
@@ -873,6 +876,7 @@ void process_gimple_call(my_data &obj,bb_data &status,gimple * stmt, bool &all_o
    }
 }
 
+//proccess gimple assign statement inside scan own function
 void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &errno_valid,
                            unsigned int &errno_stored, errno_in_builtin &errno_builtin_storage, std::list<tree> &errno_ptr)
 {
@@ -1087,13 +1091,13 @@ void process_gimple_assign(my_data &obj, bb_data &status, gimple * stmt, bool &e
 int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,bool *handler_found)
 {
    if (!name)
-      return 1;
-   int8_t return_number=1;
+      return RC_ASYNCH_SAFE;
+   int8_t return_number=RC_ASYNCH_SAFE;
    //check for undirect recurse and should stop infinite call of this function
    for (const char* fnc: call_tree)
    {
       if (strcmp(name,fnc)==0)
-         return 101;
+         return RC_ASYNCH_SAFE + 100;
       //this means that this function is ok, but wasn't scaned entirely
       //(can't scan this function, because it undirectly depends on itself),
       //function that called this function will depend on this function
@@ -1144,45 +1148,41 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
             if (obj.not_safe)
             {
                if (obj.fatal)
-                  return_number=-1;
+                  return_number=RC_ASYNCH_UNSAFE;
                else
-                  return_number=0;
+                  return_number=RC_NOT_ASYNCH_SAFE;
                call_tree.pop_back();
                return return_number;
             }
             else if (obj.errno_changed)
             {
-               if (obj.is_ok)
-                  return_number=2;
-               else
-                  return_number=102;
+               return_number= RC_ERRNO_CHANGED;
+               if (!obj.is_ok)
+                  return_number+=100;
                call_tree.pop_back();
                return return_number;
             }
             else if (obj.is_exit)
             {
-               if (obj.is_ok)
-                  return_number=4;
-               else
-                  return_number=104;
+               return_number=RC_SAFE_EXIT;
+               if (!obj.is_ok)
+                  return_number+=100;
                call_tree.pop_back();
                return return_number;
             }
             else if (obj.is_errno_setter)
             {
-               if (obj.is_ok)
-                  return_number=8;
-               else
-                  return_number=108;
+               return_number=RC_ERRNO_SETTER;
+               if (!obj.is_ok)
+                  return_number+=100;
                call_tree.pop_back();
                return return_number;
             }
             else if (obj.scaned)
             {
-               if (obj.is_ok)
-                  return_number=1;
-               else
-                  return_number=101;
+               return_number=RC_ASYNCH_SAFE;
+               if (!obj.is_ok)
+                  return_number+=100;
                call_tree.pop_back();
                return return_number;
             }
@@ -1236,16 +1236,16 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
          obj.scaned=true;
          //return value according the scan results
          if (obj.fatal)
-            return_number=-1;
+            return_number=RC_ASYNCH_UNSAFE;
          else if (obj.not_safe)
-            return_number=0;
+            return_number=RC_NOT_ASYNCH_SAFE;
          else if (obj.errno_changed)
-            return_number=2;
+            return_number=RC_ERRNO_CHANGED;
          else if (obj.is_exit)
-            return_number=4;
+            return_number=RC_SAFE_EXIT;
          else if (obj.is_errno_setter)
-            return_number=8;
-         if (return_number<=0)
+            return_number=RC_ERRNO_SETTER;
+         if (return_number == RC_NOT_ASYNCH_SAFE || return_number == RC_ASYNCH_UNSAFE)
          {
             call_tree.pop_back();
             return return_number;

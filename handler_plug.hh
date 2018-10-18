@@ -16,6 +16,13 @@
 #include "gimple-pretty-print.h"
 
 
+#define RC_NOT_ASYNCH_SAFE 0
+#define RC_ASYNCH_SAFE     1
+#define RC_ERRNO_CHANGED   2
+#define RC_SAFE_EXIT       4
+#define RC_ERRNO_SETTER    8
+#define RC_ASYNCH_UNSAFE   -1
+
 enum instruction_code {
 	IC_CHANGE_ERRNO,
 	IC_SAVE_ERRNO,
