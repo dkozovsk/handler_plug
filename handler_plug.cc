@@ -57,63 +57,83 @@ void handle_dependencies()
             solved=false;
          while(solved && !obj.depends.empty())
          {
-            depend_data depends=obj.depends.front();
-            std::list<const char*> call_tree;
-            int8_t return_number=scan_own_function(get_name(depends.fnc),call_tree,nullptr);
-            if (return_number < 99)
+            std::list<depend_data>::iterator depend_it;
+            for(depend_it=obj.depends.begin();depend_it!=obj.depends.end();)
             {
-               //if call of this function may change errno or is exit function replace placeholder with corresponding instruction
-               if ((return_number == RC_ERRNO_CHANGED || return_number == RC_SAFE_EXIT || return_number == RC_ERRNO_SETTER) && !obj.was_err)
+               depend_data depends=*depend_it;
+               std::list<const char*> call_tree;
+               int8_t return_number=scan_own_function(get_name(depends.fnc),call_tree,nullptr);
+               if (return_number < 99)
                {
-                  for (bb_data &block_data : obj.block_status)
+                  //if call of this function may change errno or is exit function replace placeholder with corresponding instruction
+                  if ((return_number == RC_ERRNO_CHANGED || return_number == RC_SAFE_EXIT || return_number == RC_ERRNO_SETTER) && !obj.was_err)
                   {
-                     if(depends.parent_block_id==block_data.block_id)
+                     for (bb_data &block_data : obj.block_status)
                      {
-                        if(block_data.instr_list.empty())
+                        if(depends.parent_block_id==block_data.block_id)
+                        {
+                           if(block_data.instr_list.empty())
+                              break;
+                           std::list<instruction>::iterator it=block_data.instr_list.begin();
+                           for(unsigned int i = 1; i < depends.parent_instr_loc;i++)
+                           {
+                              ++it;
+                           }
+                           if (return_number == RC_ERRNO_SETTER)
+                           {
+                              if((it->var=get_var_from_setter_stmt (depends.stmt)))
+                                 it->ic=IC_RESTORE_ERRNO;
+                           }
+                           else
+                              it->ic=return_number == RC_ERRNO_CHANGED ? IC_CHANGE_ERRNO : IC_EXIT;
+                           if(!block_data.is_exit)
+                              block_data.is_exit=return_number == RC_SAFE_EXIT;
+                           block_data.computed=false;
                            break;
-                        std::list<instruction>::iterator it=block_data.instr_list.begin();
-                        for(unsigned int i = 1; i < depends.parent_instr_loc;i++)
-                        {
-                           ++it;
                         }
-                        if (return_number == RC_ERRNO_SETTER)
-                        {
-                           if((it->var=get_var_from_setter_stmt (depends.stmt)))
-                              it->ic=IC_RESTORE_ERRNO;
-                        }
-                        else
-                           it->ic=return_number == RC_ERRNO_CHANGED ? IC_CHANGE_ERRNO : IC_EXIT;
-                        if(!block_data.is_exit)
-                           block_data.is_exit=return_number == RC_SAFE_EXIT;
-                        block_data.computed=false;
-                        break;
                      }
                   }
-               }
-               else if (return_number == RC_NOT_ASYNCH_SAFE || return_number == RC_ASYNCH_UNSAFE)
-               {
-                  obj.not_safe=true;
-                  if (!obj.fatal)
-                     obj.fatal=return_number==RC_ASYNCH_UNSAFE;
-                  if (obj.is_handler)
-                     print_warning(obj.fnc_tree,depends.fnc,depends.loc,return_number==RC_ASYNCH_UNSAFE);
-                  else
+                  else if (return_number == RC_NOT_ASYNCH_SAFE || return_number == RC_ASYNCH_UNSAFE)
                   {
-                     remember_error new_err;
-                     new_err.err_loc = depends.loc;
-                     new_err.err_fnc = depends.fnc;
-                     new_err.err_fatal = return_number==RC_ASYNCH_UNSAFE;
-                     obj.err_log.push_back(new_err);
+                     obj.not_safe=true;
+                     if (!obj.fatal)
+                        obj.fatal=return_number==RC_ASYNCH_UNSAFE;
+                     if (obj.is_handler)
+                        print_warning(obj.fnc_tree,depends.fnc,depends.loc,return_number==RC_ASYNCH_UNSAFE);
+                     else
+                     {
+                        remember_error new_err;
+                        new_err.err_loc = depends.loc;
+                        new_err.err_fnc = depends.fnc;
+                        new_err.err_fatal = return_number==RC_ASYNCH_UNSAFE;
+                        obj.err_log.push_back(new_err);
+                     }
                   }
+                  std::list<depend_data>::iterator tmp=depend_it;
+                  ++depend_it;
+                  obj.depends.erase(tmp);
+                  
                }
-               obj.depends.pop_front();
+               else
+               {
+                  if (return_number==RC_CYCLIC)
+                     depend_it->cyclic=true;
+                  ++depend_it;
+                  solved=false;
+                  all_solved=false;
+               }
             }
-            else
-            {
-
-               solved=false;
-               all_solved=false;
-            }
+         }
+         bool all_cyclic=true;
+         for (depend_data &depends: obj.depends)
+         {
+            if(!depends.cyclic)
+               all_cyclic=false;
+         }
+         //this fixes the problem in safe cyclic dependencies, which otherwise prevents start of the CFG analysis
+         if(!obj.was_err && !obj.depends.empty() && obj.is_handler && all_cyclic)
+         {
+            solved=true;
          }
          if(solved && obj.scaned)
          {
@@ -159,7 +179,7 @@ bool is_var_in_list(tree var, std::list<tree> &list)
    return false;
 }
 
-//intersection of two set to destination set(source set is unchanged)
+//intersection of two sets to destination set(source set is unchanged)
 void intersection(std::set<errno_var> &destination,std::set<errno_var> &source)
 {
    std::set<errno_var>::iterator it=destination.begin();
@@ -685,7 +705,7 @@ tree give_me_handler(tree var,bool first)
 int8_t is_handler_ok_fnc (const char* name)
 {
    if (!name)
-      return 0;
+      return RC_NOT_ASYNCH_SAFE;
    static const char* safe_fnc[]={
       "aio_error", "alarm", "cfgetispeed", "cfgetospeed", "getegid",
       "geteuid", "getgid", "getpgrp", "getpid", "getppid", "getuid",
@@ -778,8 +798,14 @@ void process_gimple_call(my_data &obj,bb_data &status,gimple * stmt, bool &all_o
       {
          if ((return_number = scan_own_function(called_function_name,call_tree,nullptr))>=99)
          {
-            return_number-=100;
             depend_data save_dependencies;
+            if (return_number==RC_CYCLIC)
+            {
+               return_number=RC_ASYNCH_SAFE;
+               save_dependencies.cyclic=true;
+            }
+            else
+               return_number-=100;
             save_dependencies.loc = gimple_location(stmt);
             save_dependencies.fnc = fn_decl;
             save_dependencies.stmt=stmt;
@@ -1097,7 +1123,7 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
    for (const char* fnc: call_tree)
    {
       if (strcmp(name,fnc)==0)
-         return RC_ASYNCH_SAFE + 100;
+         return RC_CYCLIC;
       //this means that this function is ok, but wasn't scaned entirely
       //(can't scan this function, because it undirectly depends on itself),
       //function that called this function will depend on this function
@@ -1182,7 +1208,18 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
             {
                return_number=RC_ASYNCH_SAFE;
                if (!obj.is_ok)
-                  return_number+=100;
+               {
+                  bool all_cyclic=true;
+                  for (depend_data &depends: obj.depends)
+                  {
+                     if(!depends.cyclic)
+                        all_cyclic=false;
+                  }
+                  if(all_cyclic)
+                     return_number=RC_CYCLIC;
+                  else
+                     return_number+=100;
+               }
                call_tree.pop_back();
                return return_number;
             }

@@ -22,6 +22,7 @@
 #define RC_SAFE_EXIT       4
 #define RC_ERRNO_SETTER    8
 #define RC_ASYNCH_UNSAFE   -1
+#define RC_CYCLIC          110
 
 enum instruction_code {
 	IC_CHANGE_ERRNO,
@@ -49,6 +50,7 @@ struct depend_data {
   gimple * stmt;
   unsigned int parent_block_id;
   unsigned int parent_instr_loc;
+  bool cyclic=false;
 };
 
 //struct for remembering assigned functions to sigaction struct variables
