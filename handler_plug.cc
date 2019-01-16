@@ -3,6 +3,7 @@
 static plugin_data data;
 
 static const char * const plugin_name = "handler_plug";
+static const char * const release_version = "0.1";
 
 //this variable represents errno in the analysis
 static const errno_var pseudo_errno={
@@ -129,15 +130,27 @@ void plugin_data::handle_dependencies()
 			//this fixes the problem in safe cyclic dependencies, which otherwise prevents start of the CFG analysis
 			if(!obj.was_err && !obj.depends.empty() && obj.is_handler && all_cyclic)
 			{
-				solved=true;
-			}
-			if(solved && obj.scaned)
-			{
-				obj.analyze_CFG();
-				if (obj.errno_changed && obj.is_handler)
+				if(obj.scaned)
 				{
-					obj.was_err =true;
-					print_errno_warning(obj.fnc_tree,obj.errno_loc);
+					obj.analyze_CFG();
+					if (obj.errno_changed && obj.is_handler)
+					{
+						solved=true;
+						obj.was_err =true;
+						print_errno_warning(obj.fnc_tree,obj.errno_loc);
+					}
+				}
+			}
+			else 
+			{
+				if(solved && obj.scaned)
+				{
+					obj.analyze_CFG();
+					if (obj.errno_changed && obj.is_handler)
+					{
+						obj.was_err =true;
+						print_errno_warning(obj.fnc_tree,obj.errno_loc);
+					}
 				}
 			}
 			if (obj.scaned && obj.depends.empty() && !obj.not_safe)
@@ -391,7 +404,7 @@ void function_data::analyze_CFG()
 	//analyze if it is own exit function
 	//that means that all predecessors of exit block must
 	//contain some asynchronous-safe exit function
-	this->is_exit=true;
+	this->is_exit=true; //TODO better check for exit, own exit functions without noreturn(not common would mean that i call my exit, and after that i call something else, it is nonsense)
 	for(bb_link &link : this->block_links)
 	{
 		if(link.successor==1)//block with ID 1 is exit block in function
@@ -408,7 +421,7 @@ void function_data::analyze_CFG()
 	}
 	if(this->is_exit)
 		return;
-	bool changed;
+	bool changed=false;
 	location_t err_loc;
 	do
 	{
@@ -427,6 +440,10 @@ void function_data::analyze_CFG()
 					{
 						if(link.predecessor==block_data.block_id)
 						{
+							if (block_data.is_exit)
+							{
+								break;
+							}
 							if(empty && block_data.computed)
 							{
 								empty=false;
@@ -1364,7 +1381,7 @@ inline void print_errno_warning(tree handler,location_t loc)
 int plugin_is_GPL_compatible;
 
 static struct plugin_info handler_check_gcc_plugin_info =
-{ "0.1", "This plugin scans signal handlers for violations of signal-safety rules" };
+{ release_version, "This plugin scans signal handlers for violations of signal-safety rules" };
 
 namespace {
 const pass_data handler_check_pass_data =
