@@ -24,6 +24,18 @@
 #define RC_ASYNCH_UNSAFE   -1
 #define RC_CYCLIC          110
 
+#define FLG_SCANED 0
+#define FLG_IS_HANDLER 1
+#define FLG_IS_OK 2 
+#define FLG_NOT_SAFE 3
+#define FLG_WAS_ERR 4
+#define FLG_FATAL 5
+#define FLG_IS_EXIT 6
+#define FLG_CAN_BE_SETTER 7
+#define FLG_IS_ERRNO_SETTER 8
+#define FLG_ERRNO_CHANGED 9
+#define FLG_OUT_OF_RANGE 10	//this is invalid index, used in control of range
+
 enum instruction_code {
 	IC_CHANGE_ERRNO,
 	IC_SAVE_ERRNO,
@@ -104,29 +116,22 @@ struct bb_link {
 
 //struct for storing all informations about scaned functions
 class function_data {
+	bool flags[10]={false,false,false,false,false,false,false,true,false,false};
 public:
-	 function* fun;
-	 tree fnc_tree;
-	 bool scaned=false;
-	 bool is_handler=false;
-	 bool is_ok=false;
-	 bool not_safe=false;
-	 bool was_err=false;
-	 bool fatal=false; 
-	 bool is_exit=false;
-	 bool can_be_setter=true;
-	 bool is_errno_setter=false;
-	 std::list<remember_error> err_log;
-	 std::list<depend_data> depends;
+	function* fun;
+	tree fnc_tree;
+	std::list<remember_error> err_log;
+	std::list<depend_data> depends;
+	
+	location_t errno_loc;
+	std::list<tree> stored_errno;
+	
+	std::list<bb_data> block_status;
+	std::list<bb_link> block_links;
 	 
-	 bool errno_changed=false;
-	 location_t errno_loc;
-	 std::list<tree> stored_errno;
-	 
-	 std::list<bb_data> block_status;
-	 std::list<bb_link> block_links;
-	 
-	 //methods
+	//methods
+	void set_flag(unsigned int index,bool value);
+	bool get_flag(unsigned int index);
 	void process_gimple_call(bb_data &status,gimple * stmt, bool &all_ok, std::list<const char*> &call_tree,
 									bool &errno_valid, unsigned int &errno_stored, std::list<tree> &errno_ptr);
 	void process_gimple_assign(bb_data &status, gimple * stmt, bool &errno_valid, unsigned int &errno_stored,

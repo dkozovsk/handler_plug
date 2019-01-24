@@ -34,6 +34,19 @@ bool operator== (const errno_var &a, const errno_var &b)
 	return false;
 }
 
+void function_data::set_flag(unsigned int index,bool value)
+{
+	if(index>=FLG_OUT_OF_RANGE)
+		return;
+	this->flags[index]=value;
+}
+bool function_data::get_flag(unsigned int index)
+{
+	if(index>=FLG_OUT_OF_RANGE)
+		return false;
+	return this->flags[index];
+}
+
 //scan functions which are defined after the scan of function, which called them
 void plugin_data::handle_dependencies()
 {
@@ -46,7 +59,7 @@ void plugin_data::handle_dependencies()
 		for (function_data &obj: this->fnc_list)
 		{
 			bool solved=true;
-			if (obj.is_ok)
+			if (obj.get_flag(FLG_IS_OK))
 				continue;
 			if (obj.depends.empty())
 				solved=false;
@@ -61,7 +74,7 @@ void plugin_data::handle_dependencies()
 					if (return_number < 99)
 					{
 						//if call of this function may change errno or is exit function replace placeholder with corresponding instruction
-						if ((return_number == RC_ERRNO_CHANGED || return_number == RC_SAFE_EXIT || return_number == RC_ERRNO_SETTER) && !obj.was_err)
+						if ((return_number == RC_ERRNO_CHANGED || return_number == RC_SAFE_EXIT || return_number == RC_ERRNO_SETTER) && !obj.get_flag(FLG_WAS_ERR))
 						{
 							for (bb_data &block_data : obj.block_status)
 							{
@@ -92,10 +105,10 @@ void plugin_data::handle_dependencies()
 						}
 						else if (return_number == RC_NOT_ASYNCH_SAFE || return_number == RC_ASYNCH_UNSAFE)
 						{
-							obj.not_safe=true;
-							if (!obj.fatal)
-								obj.fatal=return_number==RC_ASYNCH_UNSAFE;
-							if (obj.is_handler)
+							obj.set_flag(FLG_NOT_SAFE,true);
+							if (!obj.get_flag(FLG_FATAL))
+								obj.set_flag(FLG_FATAL,return_number==RC_ASYNCH_UNSAFE);
+							if (obj.get_flag(FLG_IS_HANDLER))
 								print_warning(obj.fnc_tree,depends.fnc,depends.loc,return_number==RC_ASYNCH_UNSAFE);
 							else
 							{
@@ -128,33 +141,33 @@ void plugin_data::handle_dependencies()
 					all_cyclic=false;
 			}
 			//this fixes the problem in safe cyclic dependencies, which otherwise prevents start of the CFG analysis
-			if(!obj.was_err && !obj.depends.empty() && obj.is_handler && all_cyclic)
+			if(!obj.get_flag(FLG_WAS_ERR) && !obj.depends.empty() && obj.get_flag(FLG_IS_HANDLER) && all_cyclic)
 			{
-				if(obj.scaned)
+				if(obj.get_flag(FLG_SCANED))
 				{
 					obj.analyze_CFG();
-					if (obj.errno_changed && obj.is_handler)
+					if (obj.get_flag(FLG_ERRNO_CHANGED) && obj.get_flag(FLG_IS_HANDLER))
 					{
 						solved=true;
-						obj.was_err =true;
+						obj.set_flag(FLG_WAS_ERR,true);
 						print_errno_warning(obj.fnc_tree,obj.errno_loc);
 					}
 				}
 			}
 			else 
 			{
-				if(solved && obj.scaned)
+				if(solved && obj.get_flag(FLG_SCANED))
 				{
 					obj.analyze_CFG();
-					if (obj.errno_changed && obj.is_handler)
+					if (obj.get_flag(FLG_ERRNO_CHANGED) && obj.get_flag(FLG_IS_HANDLER))
 					{
-						obj.was_err =true;
+						obj.set_flag(FLG_WAS_ERR,true);
 						print_errno_warning(obj.fnc_tree,obj.errno_loc);
 					}
 				}
 			}
-			if (obj.scaned && obj.depends.empty() && !obj.not_safe)
-				obj.is_ok=true;
+			if (obj.get_flag(FLG_SCANED) && obj.depends.empty() && !obj.get_flag(FLG_NOT_SAFE))
+				obj.set_flag(FLG_IS_OK,true);
 			if (solved)
 				nothing_solved=false;
 		}
@@ -364,9 +377,9 @@ bool bb_data::compute(location_t &err_loc,bool &changed,function_data &obj)
 		{
 			return true;
 		}
-		if(it->id!=0 && obj.can_be_setter)
+		if(it->id!=0 && obj.get_flag(FLG_CAN_BE_SETTER))
 		{
-			obj.is_errno_setter=true;
+			obj.set_flag(FLG_IS_ERRNO_SETTER,true);
 			setter_function new_setter;
 			new_setter.setter=get_name(obj.fnc_tree);
 			new_setter.position=it->id-1;
@@ -376,16 +389,16 @@ bool bb_data::compute(location_t &err_loc,bool &changed,function_data &obj)
 			{
 				if(!has_same_param(new_setter))
 				{
-					obj.can_be_setter=false;
+					obj.set_flag(FLG_CAN_BE_SETTER,false);
 					remove_errno_setter(new_setter);
 				}
 			}
 		}
-		else if (obj.can_be_setter)
+		else if (obj.get_flag(FLG_CAN_BE_SETTER))
 		{
 			setter_function new_setter;
 			new_setter.setter=get_name(obj.fnc_tree);
-			obj.can_be_setter=false;
+			obj.set_flag(FLG_CAN_BE_SETTER,false);
 			remove_errno_setter(new_setter);
 		}
 		return false;
@@ -404,7 +417,9 @@ void function_data::analyze_CFG()
 	//analyze if it is own exit function
 	//that means that all predecessors of exit block must
 	//contain some asynchronous-safe exit function
-	this->is_exit=true; //TODO better check for exit, own exit functions without noreturn(not common would mean that i call my exit, and after that i call something else, it is nonsense)
+	this->set_flag(FLG_IS_EXIT,true);
+	//TODO better check for exit, own exit functions without noreturn
+	//(not common would mean that i call my exit, and after that i call something else. it is nonsense)
 	for(bb_link &link : this->block_links)
 	{
 		if(link.successor==1)//block with ID 1 is exit block in function
@@ -414,12 +429,12 @@ void function_data::analyze_CFG()
 				if(link.predecessor==block_data.block_id)
 				{
 					if(!block_data.is_exit)
-						this->is_exit=false;
+						this->set_flag(FLG_IS_EXIT,false);
 				}
 			}
 		}
 	}
-	if(this->is_exit)
+	if(this->get_flag(FLG_IS_EXIT))
 		return;
 	bool changed=false;
 	location_t err_loc;
@@ -465,7 +480,7 @@ void function_data::analyze_CFG()
 			if (status.compute(err_loc,changed,*this))
 			{
 				this->errno_loc=err_loc;
-				this->errno_changed=true;
+				this->set_flag(FLG_ERRNO_CHANGED,true);
 				return;
 			}
 		}
@@ -867,9 +882,9 @@ void function_data::process_gimple_call(bb_data &status,gimple * stmt, bool &all
 	if (return_number == RC_NOT_ASYNCH_SAFE || return_number == RC_ASYNCH_UNSAFE)
 	{
 		all_ok=false;
-		this->not_safe=true;
+		this->set_flag(FLG_NOT_SAFE,true);
 
-		if (this->is_handler)
+		if (this->get_flag(FLG_IS_HANDLER))
 			print_warning(this->fnc_tree,fn_decl,gimple_location(stmt),return_number==RC_ASYNCH_UNSAFE);
 		else
 		{
@@ -881,7 +896,7 @@ void function_data::process_gimple_call(bb_data &status,gimple * stmt, bool &all
 		}
 
 		if (return_number == RC_ASYNCH_UNSAFE)
-			this->fatal=true;
+			this->set_flag(FLG_FATAL,true);
 
 		return;
 	}
@@ -1159,17 +1174,17 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
 			if (handler_found != nullptr)
 			{
 				*handler_found=true;
-				if (obj.errno_changed && !obj.is_handler)
+				if (obj.get_flag(FLG_ERRNO_CHANGED) && !obj.get_flag(FLG_IS_HANDLER))
 				{
-					obj.was_err=true;
+					obj.set_flag(FLG_WAS_ERR,true);
 					print_errno_warning(obj.fnc_tree,obj.errno_loc);
 				}
-				if (obj.is_handler && obj.scaned)
+				if (obj.get_flag(FLG_IS_HANDLER) && obj.get_flag(FLG_SCANED))
 					return return_number;
-				obj.is_handler=true;
-				if (obj.is_ok)
+				obj.set_flag(FLG_IS_HANDLER,true);
+				if (obj.get_flag(FLG_IS_OK))
 					return return_number;
-				if (obj.not_safe)
+				if (obj.get_flag(FLG_NOT_SAFE))
 				{
 					while (!obj.err_log.empty())
 					{
@@ -1179,48 +1194,48 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
 					}
 					break;
 				}
-				if(obj.scaned)
+				if(obj.get_flag(FLG_SCANED))
 					return return_number;
 			}
 			else
 			{
-				if (obj.not_safe)
+				if (obj.get_flag(FLG_NOT_SAFE))
 				{
-					if (obj.fatal)
+					if (obj.get_flag(FLG_FATAL))
 						return_number=RC_ASYNCH_UNSAFE;
 					else
 						return_number=RC_NOT_ASYNCH_SAFE;
 					call_tree.pop_back();
 					return return_number;
 				}
-				else if (obj.errno_changed)
+				else if (obj.get_flag(FLG_ERRNO_CHANGED))
 				{
 					return_number= RC_ERRNO_CHANGED;
-					if (!obj.is_ok)
+					if (!obj.get_flag(FLG_IS_OK))
 						return_number+=100;
 					call_tree.pop_back();
 					return return_number;
 				}
-				else if (obj.is_exit)
+				else if (obj.get_flag(FLG_IS_EXIT))
 				{
 					return_number=RC_SAFE_EXIT;
-					if (!obj.is_ok)
+					if (!obj.get_flag(FLG_IS_OK))
 						return_number+=100;
 					call_tree.pop_back();
 					return return_number;
 				}
-				else if (obj.is_errno_setter)
+				else if (obj.get_flag(FLG_IS_ERRNO_SETTER))
 				{
 					return_number=RC_ERRNO_SETTER;
-					if (!obj.is_ok)
+					if (!obj.get_flag(FLG_IS_OK))
 						return_number+=100;
 					call_tree.pop_back();
 					return return_number;
 				}
-				else if (obj.scaned)
+				else if (obj.get_flag(FLG_SCANED))
 				{
 					return_number=RC_ASYNCH_SAFE;
-					if (!obj.is_ok)
+					if (!obj.get_flag(FLG_IS_OK))
 					{
 						bool all_cyclic=true;
 						for (depend_data &depends: obj.depends)
@@ -1254,10 +1269,10 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
 					//print_gimple_stmt (stderr,stmt,0,0);
 					if (gimple_code(stmt)==GIMPLE_CALL)
 						obj.process_gimple_call(status, stmt, all_ok, call_tree, errno_valid, errno_stored, errno_ptr);
-					else if (!obj.was_err && gimple_code(stmt)==GIMPLE_ASSIGN)
+					else if (!obj.get_flag(FLG_WAS_ERR) && gimple_code(stmt)==GIMPLE_ASSIGN)
 						obj.process_gimple_assign(status, stmt, errno_valid, errno_stored, errno_builtin_storage, errno_ptr);
 				}
-				if (!obj.was_err)
+				if (!obj.get_flag(FLG_WAS_ERR))
 				{
 					obj.block_status.push_back(status);
 					edge e;
@@ -1274,26 +1289,26 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
 				}
 			}
 			//scan complete, start CFG analysis
-			if (!obj.was_err && obj.depends.empty())
+			if (!obj.get_flag(FLG_WAS_ERR) && obj.depends.empty())
 			{
 				obj.analyze_CFG();
-				if (obj.is_handler && obj.errno_changed)
+				if (obj.get_flag(FLG_IS_HANDLER) && obj.get_flag(FLG_ERRNO_CHANGED))
 				{
-					obj.was_err=true;
+					obj.set_flag(FLG_WAS_ERR,true);
 					print_errno_warning(obj.fnc_tree,obj.errno_loc);
 				}
 			}
-			obj.scaned=true;
+			obj.set_flag(FLG_SCANED,true);
 			//return value according the scan results
-			if (obj.fatal)
+			if (obj.get_flag(FLG_FATAL))
 				return_number=RC_ASYNCH_UNSAFE;
-			else if (obj.not_safe)
+			else if (obj.get_flag(FLG_NOT_SAFE))
 				return_number=RC_NOT_ASYNCH_SAFE;
-			else if (obj.errno_changed)
+			else if (obj.get_flag(FLG_ERRNO_CHANGED))
 				return_number=RC_ERRNO_CHANGED;
-			else if (obj.is_exit)
+			else if (obj.get_flag(FLG_IS_EXIT))
 				return_number=RC_SAFE_EXIT;
-			else if (obj.is_errno_setter)
+			else if (obj.get_flag(FLG_IS_ERRNO_SETTER))
 				return_number=RC_ERRNO_SETTER;
 			if (return_number == RC_NOT_ASYNCH_SAFE || return_number == RC_ASYNCH_UNSAFE)
 			{
@@ -1301,7 +1316,7 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
 				return return_number;
 			}
 			// if everything scaned succesfully function is asynchronous-safe
-			obj.is_ok=all_ok;
+			obj.set_flag(FLG_IS_OK,all_ok);
 		}
 	}
 	call_tree.pop_back();
