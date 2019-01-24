@@ -116,10 +116,10 @@ struct bb_link {
 
 //struct for storing all informations about scaned functions
 class function_data {
-	bool flags[10]={false,false,false,false,false,false,false,true,false,false};
-public:
+	bool flags[10];
 	function* fun;
 	tree fnc_tree;
+public:
 	std::list<remember_error> err_log;
 	std::list<depend_data> depends;
 	
@@ -127,11 +127,15 @@ public:
 	std::list<tree> stored_errno;
 	
 	std::list<bb_data> block_status;
-	std::list<bb_link> block_links;
-	 
+	std::list<bb_link> block_links; 
+	//constructor
+	function_data(function* fun, tree fnc_tree);
+	function_data() = delete;
 	//methods
 	void set_flag(unsigned int index,bool value);
 	bool get_flag(unsigned int index);
+	tree get_fnc_decl();
+	function* get_fnc_ptr();
 	void process_gimple_call(bb_data &status,gimple * stmt, bool &all_ok, std::list<const char*> &call_tree,
 									bool &errno_valid, unsigned int &errno_stored, std::list<tree> &errno_ptr);
 	void process_gimple_assign(bb_data &status, gimple * stmt, bool &errno_valid, unsigned int &errno_stored,

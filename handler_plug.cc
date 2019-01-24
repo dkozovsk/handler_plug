@@ -46,6 +46,30 @@ bool function_data::get_flag(unsigned int index)
 		return false;
 	return this->flags[index];
 }
+function_data::function_data(function* fun, tree fnc_tree)
+{
+	this->fun=fun;
+	this->fnc_tree=fnc_tree;
+	
+	this->set_flag(FLG_SCANED,false);
+	this->set_flag(FLG_IS_HANDLER,false);
+	this->set_flag(FLG_IS_OK,false);
+	this->set_flag(FLG_NOT_SAFE,false);
+	this->set_flag(FLG_WAS_ERR,false);
+	this->set_flag(FLG_FATAL,false);
+	this->set_flag(FLG_IS_EXIT,false);
+	this->set_flag(FLG_CAN_BE_SETTER,true);
+	this->set_flag(FLG_IS_ERRNO_SETTER,false);
+	this->set_flag(FLG_ERRNO_CHANGED,false);
+}
+tree function_data::get_fnc_decl()
+{
+	return this->fnc_tree;
+}
+function* function_data::get_fnc_ptr()
+{
+	return this->fun;
+}
 
 //scan functions which are defined after the scan of function, which called them
 void plugin_data::handle_dependencies()
@@ -109,7 +133,7 @@ void plugin_data::handle_dependencies()
 							if (!obj.get_flag(FLG_FATAL))
 								obj.set_flag(FLG_FATAL,return_number==RC_ASYNCH_UNSAFE);
 							if (obj.get_flag(FLG_IS_HANDLER))
-								print_warning(obj.fnc_tree,depends.fnc,depends.loc,return_number==RC_ASYNCH_UNSAFE);
+								print_warning(obj.get_fnc_decl(),depends.fnc,depends.loc,return_number==RC_ASYNCH_UNSAFE);
 							else
 							{
 								remember_error new_err;
@@ -150,7 +174,7 @@ void plugin_data::handle_dependencies()
 					{
 						solved=true;
 						obj.set_flag(FLG_WAS_ERR,true);
-						print_errno_warning(obj.fnc_tree,obj.errno_loc);
+						print_errno_warning(obj.get_fnc_decl(),obj.errno_loc);
 					}
 				}
 			}
@@ -162,7 +186,7 @@ void plugin_data::handle_dependencies()
 					if (obj.get_flag(FLG_ERRNO_CHANGED) && obj.get_flag(FLG_IS_HANDLER))
 					{
 						obj.set_flag(FLG_WAS_ERR,true);
-						print_errno_warning(obj.fnc_tree,obj.errno_loc);
+						print_errno_warning(obj.get_fnc_decl(),obj.errno_loc);
 					}
 				}
 			}
@@ -381,9 +405,9 @@ bool bb_data::compute(location_t &err_loc,bool &changed,function_data &obj)
 		{
 			obj.set_flag(FLG_IS_ERRNO_SETTER,true);
 			setter_function new_setter;
-			new_setter.setter=get_name(obj.fnc_tree);
+			new_setter.setter=get_name(obj.get_fnc_decl());
 			new_setter.position=it->id-1;
-			if (!is_setter(obj.fnc_tree, data.errno_setters))
+			if (!is_setter(obj.get_fnc_decl(), data.errno_setters))
 				data.errno_setters.push_back(new_setter);
 			else
 			{
@@ -397,7 +421,7 @@ bool bb_data::compute(location_t &err_loc,bool &changed,function_data &obj)
 		else if (obj.get_flag(FLG_CAN_BE_SETTER))
 		{
 			setter_function new_setter;
-			new_setter.setter=get_name(obj.fnc_tree);
+			new_setter.setter=get_name(obj.get_fnc_decl());
 			obj.set_flag(FLG_CAN_BE_SETTER,false);
 			remove_errno_setter(new_setter);
 		}
@@ -820,7 +844,7 @@ void function_data::process_gimple_call(bb_data &status,gimple * stmt, bool &all
 	if (DECL_INITIAL  (fn_decl))
 	{
 		// in case of recurse, do nothing
-		if (strcmp(get_name(this->fnc_tree),called_function_name)==0)
+		if (strcmp(get_name(this->get_fnc_decl()),called_function_name)==0)
 			return;
 		else
 		{
@@ -885,7 +909,7 @@ void function_data::process_gimple_call(bb_data &status,gimple * stmt, bool &all
 		this->set_flag(FLG_NOT_SAFE,true);
 
 		if (this->get_flag(FLG_IS_HANDLER))
-			print_warning(this->fnc_tree,fn_decl,gimple_location(stmt),return_number==RC_ASYNCH_UNSAFE);
+			print_warning(this->get_fnc_decl(),fn_decl,gimple_location(stmt),return_number==RC_ASYNCH_UNSAFE);
 		else
 		{
 			remember_error new_err;
@@ -986,7 +1010,7 @@ void function_data::process_gimple_assign(bb_data &status, gimple * stmt, bool &
 					if (errno_builtin_storage.var && TREE_CODE(errno_builtin_storage.var)==PARM_DECL)
 					{
 						unsigned counter=0;
-						for (tree argument = DECL_ARGUMENTS (this->fnc_tree) ; argument ; argument = TREE_CHAIN (argument))
+						for (tree argument = DECL_ARGUMENTS (this->get_fnc_decl()) ; argument ; argument = TREE_CHAIN (argument))
 						{
 							if (strcmp(get_name(argument),get_name(errno_builtin_storage.var))==0)
 							{
@@ -1030,7 +1054,7 @@ void function_data::process_gimple_assign(bb_data &status, gimple * stmt, bool &
 					if (errno_builtin_storage.var && TREE_CODE(errno_builtin_storage.var)==PARM_DECL)
 					{
 						unsigned counter=0;
-						for (tree argument = DECL_ARGUMENTS (this->fnc_tree) ; argument ; argument = TREE_CHAIN (argument))
+						for (tree argument = DECL_ARGUMENTS (this->get_fnc_decl()) ; argument ; argument = TREE_CHAIN (argument))
 						{
 							if (strcmp(get_name(argument),get_name(errno_builtin_storage.var))==0)
 							{
@@ -1168,7 +1192,7 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
 
 	for (function_data &obj: data.fnc_list)
 	{
-		if (strcmp(get_name(obj.fnc_tree),name)==0)
+		if (strcmp(get_name(obj.get_fnc_decl()),name)==0)
 		{
 			//check if it was already scaned
 			if (handler_found != nullptr)
@@ -1177,7 +1201,7 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
 				if (obj.get_flag(FLG_ERRNO_CHANGED) && !obj.get_flag(FLG_IS_HANDLER))
 				{
 					obj.set_flag(FLG_WAS_ERR,true);
-					print_errno_warning(obj.fnc_tree,obj.errno_loc);
+					print_errno_warning(obj.get_fnc_decl(),obj.errno_loc);
 				}
 				if (obj.get_flag(FLG_IS_HANDLER) && obj.get_flag(FLG_SCANED))
 					return return_number;
@@ -1189,7 +1213,7 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
 					while (!obj.err_log.empty())
 					{
 						remember_error err = obj.err_log.front();
-						print_warning(obj.fnc_tree,err.err_fnc,err.err_loc,err.err_fatal);
+						print_warning(obj.get_fnc_decl(),err.err_fnc,err.err_loc,err.err_fatal);
 						obj.err_log.pop_front();
 					}
 					break;
@@ -1254,7 +1278,7 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
 			}
 			all_ok=true;
 			//start the scan
-			FOR_ALL_BB_FN(bb, obj.fun)
+			FOR_ALL_BB_FN(bb, obj.get_fnc_ptr())
 			{
 				bb_data status;
 				status.block_id=bb->index;
@@ -1295,7 +1319,7 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
 				if (obj.get_flag(FLG_IS_HANDLER) && obj.get_flag(FLG_ERRNO_CHANGED))
 				{
 					obj.set_flag(FLG_WAS_ERR,true);
-					print_errno_warning(obj.fnc_tree,obj.errno_loc);
+					print_errno_warning(obj.get_fnc_decl(),obj.errno_loc);
 				}
 			}
 			obj.set_flag(FLG_SCANED,true);
@@ -1422,9 +1446,7 @@ struct handler_check_pass : gimple_opt_pass
 	{
 		basic_block bb;
 		tree handler=nullptr;
-		function_data new_fnc;
-		new_fnc.fun=fun;
-		new_fnc.fnc_tree=current_function_decl;
+		function_data new_fnc(fun,current_function_decl);
 		data.fnc_list.push_front(new_fnc);
 		//Start look for handlers
 		FOR_ALL_BB_FN(bb, fun)
@@ -1499,7 +1521,7 @@ struct handler_check_pass : gimple_opt_pass
 			for (function_data &obj: data.fnc_list)
 			{
 				basic_block bb;
-				FOR_ALL_BB_FN(bb, obj.fun)
+				FOR_ALL_BB_FN(bb, obj.get_fnc_ptr())
 				{
 
 					gimple_stmt_iterator gsi;
@@ -1508,7 +1530,7 @@ struct handler_check_pass : gimple_opt_pass
 						gimple * stmt = gsi_stmt (gsi);
 						if (gimple_code(stmt)==GIMPLE_CALL)
 						{
-							handler = scan_own_handler_setter(stmt,obj.fnc_tree);
+							handler = scan_own_handler_setter(stmt,obj.get_fnc_decl());
 							if (handler!=nullptr)
 							{
 								data.handlers.push_front(handler);
