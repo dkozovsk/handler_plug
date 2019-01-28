@@ -48,8 +48,8 @@ bool function_data::get_flag(unsigned int index)
 }
 function_data::function_data(function* fun, tree fnc_tree)
 {
-	this->fun=fun;
-	this->fnc_tree=fnc_tree;
+	this->fnc_ptr=fun;
+	this->fnc_decl=fnc_tree;
 	
 	this->set_flag(FLG_SCANED,false);
 	this->set_flag(FLG_IS_HANDLER,false);
@@ -64,11 +64,11 @@ function_data::function_data(function* fun, tree fnc_tree)
 }
 tree function_data::get_fnc_decl()
 {
-	return this->fnc_tree;
+	return this->fnc_decl;
 }
 function* function_data::get_fnc_ptr()
 {
-	return this->fun;
+	return this->fnc_ptr;
 }
 
 //scan functions which are defined after the scan of function, which called them
@@ -444,18 +444,22 @@ void function_data::analyze_CFG()
 	this->set_flag(FLG_IS_EXIT,true);
 	//TODO better check for exit, own exit functions without noreturn
 	//(not common would mean that i call my exit, and after that i call something else. it is nonsense)
-	for(bb_link &link : this->block_links)
+	for(bb_data &status : this->block_status)
 	{
-		if(link.successor==1)//block with ID 1 is exit block in function
+		if(status.block_id==1)
 		{
-			for (bb_data &block_data : this->block_status)
+			for(unsigned int predecessor : status.preds)
 			{
-				if(link.predecessor==block_data.block_id)
+				for (bb_data &block_data : this->block_status)
 				{
-					if(!block_data.is_exit)
-						this->set_flag(FLG_IS_EXIT,false);
+					if(predecessor==block_data.block_id)
+					{
+						if(!block_data.is_exit)
+							this->set_flag(FLG_IS_EXIT,false);
+					}
 				}
 			}
+			break;
 		}
 	}
 	if(this->get_flag(FLG_IS_EXIT))
@@ -471,29 +475,26 @@ void function_data::analyze_CFG()
 			bool empty=true;
 			//compute input set for block as intersection of output sets
 			//of all blocks that are predecessors for computed block
-			for(bb_link &link : this->block_links)
+			for(unsigned int predecessor : status.preds)
 			{
-				if(link.successor==status.block_id)
+				for (bb_data &block_data : this->block_status)
 				{
-					for (bb_data &block_data : this->block_status)
+					if(predecessor==block_data.block_id)
 					{
-						if(link.predecessor==block_data.block_id)
+						if (block_data.is_exit)
 						{
-							if (block_data.is_exit)
-							{
-								break;
-							}
-							if(empty && block_data.computed)
-							{
-								empty=false;
-								new_set=block_data.output_set;
-							}
-							else if (block_data.computed)
-							{
-								intersection(new_set,block_data.output_set);
-							}
 							break;
 						}
+						if(empty && block_data.computed)
+						{
+							empty=false;
+							new_set=block_data.output_set;
+						}
+						else if (block_data.computed)
+						{
+							intersection(new_set,block_data.output_set);
+						}
+						break;
 					}
 				}
 			}
@@ -1298,18 +1299,15 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
 				}
 				if (!obj.get_flag(FLG_WAS_ERR))
 				{
-					obj.block_status.push_back(status);
 					edge e;
 					edge_iterator ei;
 
-					FOR_EACH_EDGE(e, ei, bb->succs)
+					FOR_EACH_EDGE(e, ei, bb->preds)
 					{
-					  basic_block succ = e->dest;
-					  bb_link link;
-					  link.predecessor=bb->index;
-					  link.successor=succ->index;
-					  obj.block_links.push_back(link);
+					  basic_block pred = e->src;
+					  status.preds.push_back(pred->index);
 					}
+					obj.block_status.push_back(status);
 				}
 			}
 			//scan complete, start CFG analysis

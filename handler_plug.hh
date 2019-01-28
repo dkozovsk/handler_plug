@@ -104,21 +104,17 @@ public:
 	std::list<instruction> instr_list;
 	std::set<errno_var> input_set;
 	std::set<errno_var> output_set;
+	std::list<unsigned int> preds;
 	
 	//methods
-	bool compute(location_t &err_loc,bool &changed,function_data &obj);
-};
-
-struct bb_link {
-	unsigned int predecessor;
-	unsigned int successor;
+	bool compute(location_t &err_loc, bool &changed, function_data &obj);
 };
 
 //struct for storing all informations about scaned functions
 class function_data {
 	bool flags[10];
-	function* fun;
-	tree fnc_tree;
+	function* fnc_ptr;
+	tree fnc_decl;
 public:
 	std::list<remember_error> err_log;
 	std::list<depend_data> depends;
@@ -127,7 +123,6 @@ public:
 	std::list<tree> stored_errno;
 	
 	std::list<bb_data> block_status;
-	std::list<bb_link> block_links; 
 	//constructor
 	function_data(function* fun, tree fnc_tree);
 	function_data() = delete;
@@ -159,8 +154,8 @@ public:
 };
 int8_t is_handler_ok_fnc (const char* name);
 bool is_handler_wrong_fnc(const char* name);
-int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,bool *handler_found);
-tree get_var_from_setter_stmt (gimple*stmt);
+int8_t scan_own_function (const char* name, std::list<const char*> &call_tree, bool *handler_found);
+tree get_var_from_setter_stmt (gimple* stmt);
 tree give_me_handler(tree var,bool first);
 //setter list
 bool is_setter(tree fnc, std::list<setter_function> &setter_list);
@@ -170,12 +165,12 @@ void remove_errno_setter(setter_function &setter);
 //handler setter list
 tree scan_own_handler_setter(gimple* stmt, tree fun_decl);
 //CFG analisys
-void intersection(std::set<errno_var> &destination,std::set<errno_var> &source);
-bool equal_sets(std::set<errno_var> &a,std::set<errno_var> &b);
+void intersection(std::set<errno_var> &destination, std::set<errno_var> &source);
+bool equal_sets(std::set<errno_var> &a, std::set<errno_var> &b);
 errno_var tree_to_errno_var(tree var);
 //warnings
-inline void print_warning(tree handler,tree fnc,location_t loc,bool fatal);
-inline void print_errno_warning(tree handler,location_t loc);
+inline void print_warning(tree handler, tree fnc,location_t loc,bool fatal);
+inline void print_errno_warning(tree handler, location_t loc);
 //errno list operations
 bool is_var_in_list(tree var, std::list<tree> &list);
 void add_unique_to_list(tree var, std::list<tree> &list);
