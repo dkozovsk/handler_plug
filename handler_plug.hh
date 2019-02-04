@@ -97,8 +97,8 @@ struct errno_in_builtin {
 class function_data;
 
 class bb_data {
-public:
 	unsigned int block_id;
+public:
 	bool computed=false;
 	bool is_exit=false;
 	std::list<instruction> instr_list;
@@ -106,8 +106,12 @@ public:
 	std::set<errno_var> output_set;
 	std::list<unsigned int> preds;
 	
+	//constructor
+	bb_data(unsigned int id);
+	bb_data() = delete;
 	//methods
 	bool compute(location_t &err_loc, bool &changed, function_data &obj);
+	unsigned int get_block_id();
 };
 
 //struct for storing all informations about scaned functions

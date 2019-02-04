@@ -34,6 +34,16 @@ bool operator== (const errno_var &a, const errno_var &b)
 	return false;
 }
 
+bb_data::bb_data(unsigned int id)
+{
+	this->block_id=id;
+}
+
+unsigned int bb_data::get_block_id()
+{
+	return this->block_id;
+}
+
 void function_data::set_flag(unsigned int index,bool value)
 {
 	if(index>=FLG_OUT_OF_RANGE)
@@ -102,7 +112,7 @@ void plugin_data::handle_dependencies()
 						{
 							for (bb_data &block_data : obj.block_status)
 							{
-								if(depends.parent_block_id==block_data.block_id)
+								if(depends.parent_block_id==block_data.get_block_id())
 								{
 									if(block_data.instr_list.empty())
 										break;
@@ -446,13 +456,13 @@ void function_data::analyze_CFG()
 	//(not common would mean that i call my exit, and after that i call something else. it is nonsense)
 	for(bb_data &status : this->block_status)
 	{
-		if(status.block_id==1)
+		if(status.get_block_id()==1)
 		{
 			for(unsigned int predecessor : status.preds)
 			{
 				for (bb_data &block_data : this->block_status)
 				{
-					if(predecessor==block_data.block_id)
+					if(predecessor==block_data.get_block_id())
 					{
 						if(!block_data.is_exit)
 							this->set_flag(FLG_IS_EXIT,false);
@@ -479,7 +489,7 @@ void function_data::analyze_CFG()
 			{
 				for (bb_data &block_data : this->block_status)
 				{
-					if(predecessor==block_data.block_id)
+					if(predecessor==block_data.get_block_id())
 					{
 						if (block_data.is_exit)
 						{
@@ -871,7 +881,7 @@ void function_data::process_gimple_call(bb_data &status,gimple * stmt, bool &all
 				new_instr.instr_loc=gimple_location(stmt);
 				status.instr_list.push_back(new_instr);
 				save_dependencies.parent_instr_loc=status.instr_list.size();
-				save_dependencies.parent_block_id=status.block_id;
+				save_dependencies.parent_block_id=status.get_block_id();
 
 				all_ok=false;
 				data.dependencies_handled=false;
@@ -1281,8 +1291,7 @@ int8_t scan_own_function (const char* name,std::list<const char*> &call_tree,boo
 			//start the scan
 			FOR_ALL_BB_FN(bb, obj.get_fnc_ptr())
 			{
-				bb_data status;
-				status.block_id=bb->index;
+				bb_data status(bb->index);
 
 				status.input_set.insert(pseudo_errno);
 				status.output_set.insert(pseudo_errno);
