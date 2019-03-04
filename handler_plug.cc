@@ -421,10 +421,10 @@ bool bb_data::compute(location_t &err_loc,bool &changed,function_data &obj)
 				data.errno_setters.push_back(new_setter);
 			else
 			{
-				if(!has_same_param(new_setter))
+				if(!data.has_same_param(new_setter))
 				{
 					obj.set_flag(FLG_CAN_BE_SETTER,false);
-					remove_errno_setter(new_setter);
+					data.remove_errno_setter(new_setter);
 				}
 			}
 		}
@@ -433,7 +433,7 @@ bool bb_data::compute(location_t &err_loc,bool &changed,function_data &obj)
 			setter_function new_setter;
 			new_setter.setter=get_name(obj.get_fnc_decl());
 			obj.set_flag(FLG_CAN_BE_SETTER,false);
-			remove_errno_setter(new_setter);
+			data.remove_errno_setter(new_setter);
 		}
 		return false;
 	}
@@ -536,9 +536,9 @@ bool is_setter(tree fnc, std::list<setter_function> &setter_list)
 }
 
 //one function cant set errno from two different parameters
-bool has_same_param(setter_function &setter)
+bool plugin_data::has_same_param(setter_function &setter)
 {
-	for (setter_function &obj: data.errno_setters)
+	for (setter_function &obj: this->errno_setters)
 	{
 		if (strcmp(obj.setter,setter.setter) == 0)
 		{
@@ -551,14 +551,14 @@ bool has_same_param(setter_function &setter)
 }
 
 //remove setter from errno_setters list
-void remove_errno_setter(setter_function &setter)
+void plugin_data::remove_errno_setter(setter_function &setter)
 {
 	std::list<setter_function>::iterator it;
-	for(it = data.errno_setters.begin(); it != data.errno_setters.end(); ++it)
+	for(it = this->errno_setters.begin(); it != this->errno_setters.end(); ++it)
 	{
 		if (strcmp(it->setter,setter.setter) == 0)
 		{
-			data.errno_setters.erase(it);
+			this->errno_setters.erase(it);
 			return;
 		}
 	}
@@ -682,14 +682,14 @@ tree get_handler(gimple* stmt)
 		}
 	}
 	else
-		return scan_own_handler_setter(stmt,current_function_decl);
+		return data.scan_own_handler_setter(stmt,current_function_decl);
 	return nullptr;
 }
 
 //look through own setters, try to find handler if own setter was called
-tree scan_own_handler_setter(gimple* stmt,tree fun_decl)
+tree plugin_data::scan_own_handler_setter(gimple* stmt,tree fun_decl)
 {
-	for (setter_function &obj: data.own_setters)
+	for (setter_function &obj: this->own_setters)
 	{
 		tree current_fn = gimple_call_fn(stmt);
 		if (!current_fn)
@@ -709,15 +709,15 @@ tree scan_own_handler_setter(gimple* stmt,tree fun_decl)
 				{
 					if (strcmp(get_name(argument),get_name(var))==0)
 					{
-						if (is_setter(fun_decl,data.own_setters))
+						if (is_setter(fun_decl,this->own_setters))
 						{
 							break;
 						}
 						setter_function new_setter;
 						new_setter.setter = get_name(fun_decl);
 						new_setter.position = counter;
-						data.own_setters.push_front(new_setter);
-						data.added_new_setter=true;
+						this->own_setters.push_front(new_setter);
+						this->added_new_setter=true;
 						break;
 					}
 					++counter;
@@ -1537,7 +1537,7 @@ struct handler_check_pass : gimple_opt_pass
 						gimple * stmt = gsi_stmt (gsi);
 						if (gimple_code(stmt)==GIMPLE_CALL)
 						{
-							handler = scan_own_handler_setter(stmt,obj.get_fnc_decl());
+							handler = data.scan_own_handler_setter(stmt,obj.get_fnc_decl());
 							if (handler!=nullptr)
 							{
 								data.handlers.push_front(handler);

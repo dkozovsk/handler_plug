@@ -155,7 +155,13 @@ public:
 	
 	//methods
 	void handle_dependencies();
+	//errno setter list
+	bool has_same_param(setter_function &setter);
+	void remove_errno_setter(setter_function &setter);
+	//handler setter list
+	tree scan_own_handler_setter(gimple* stmt, tree fun_decl);
 };
+
 int8_t is_handler_ok_fnc (const char* name);
 bool is_handler_wrong_fnc(const char* name);
 int8_t scan_own_function (const char* name, std::list<const char*> &call_tree, bool *handler_found);
@@ -163,11 +169,6 @@ tree get_var_from_setter_stmt (gimple* stmt);
 tree give_me_handler(tree var,bool first);
 //setter list
 bool is_setter(tree fnc, std::list<setter_function> &setter_list);
-//errno setter list
-bool has_same_param(setter_function &setter);
-void remove_errno_setter(setter_function &setter);
-//handler setter list
-tree scan_own_handler_setter(gimple* stmt, tree fun_decl);
 //CFG analisys
 void intersection(std::set<errno_var> &destination, std::set<errno_var> &source);
 bool equal_sets(std::set<errno_var> &a, std::set<errno_var> &b);
